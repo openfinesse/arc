@@ -1,4 +1,4 @@
-# Resume Customizer
+# Automated Resume Customizer (ARC)
 
 An agentic workflow system that customizes resumes for specific job applications based on a base resume in YAML format and a job description.
 
@@ -17,14 +17,14 @@ This system follows a multi-step workflow to create tailored resumes:
 
 - Python 3.8+
 - OpenAI API key (for most agents)
-- Perplexity API key (for company research)
+- Tavily or Perplexity API key (for company research)
 
 ## Installation
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/yourusername/resume-customizer.git
-   cd resume-customizer
+   git clone https://github.com/openfinesse/arc.git
+   cd arc
    ```
 
 2. Install the required packages:
@@ -38,9 +38,10 @@ This system follows a multi-step workflow to create tailored resumes:
    ```bash
    export OPENAI_API_KEY="your_openai_api_key"
    export PERPLEXITY_API_KEY="your_perplexity_api_key"
+   export TAVILY_API_KEY="your_tavily_api_key"
    ```
 
-2. Prepare your base resume in YAML format (see `resume.yaml` for an example)
+2. Prepare your base resume in YAML format (see `resume_example.yaml` for an example)
 
 3. Save your job description in a text file
 
@@ -113,7 +114,3 @@ Each agent can be used independently or as part of the orchestrated workflow.
 ## Customization
 
 You can modify the agent parameters in their respective files under `src/agents/`.
-
-## License
-
-MIT License 
