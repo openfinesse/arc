@@ -191,3 +191,8 @@ data/*
 input/*
 
 config.local.yaml
+
+*.bak
+jobs.csv
+src/steel_file_upload_test.py
+src/agents/linkedin_scrape.py
