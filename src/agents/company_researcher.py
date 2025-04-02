@@ -1,30 +1,43 @@
 #!/usr/bin/env python3
 import os
-import requests
 import re
 import json
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, List
+import sys
 
-class CompanyResearcher:
+from .base_agent import Agent
+
+class CompanyResearcher(Agent):
     """
     Agent responsible for researching company information using APIs
     and enriching the job description with additional context.
     """
     
     def __init__(self):
-        # Get API keys from environment variables
-        self.tavily_api_key = os.environ.get("TAVILY_API_KEY")
-        if not self.tavily_api_key:
-            print("Warning: TAVILY_API_KEY environment variable not set.")
-            print("Company research capabilities will be limited.")
+        super().__init__(name="CompanyResearcher")
+        # Get API configuration directly from environment variables
+        self.research_api_provider = os.environ.get("RESEARCH_API_PROVIDER", "perplexity").lower()
+        
+        # Validate API keys based on configured provider
+        if self.research_api_provider == "tavily":
+            self.tavily_api_key = os.environ.get("TAVILY_API_KEY")
+            if not self.tavily_api_key:
+                print("Warning: TAVILY_API_KEY environment variable not set.")
+                print("Company research capabilities will be limited.")
+        elif self.research_api_provider == "perplexity":
+            self.perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
+            if not self.perplexity_api_key:
+                print("Warning: PERPLEXITY_API_KEY environment variable not set.")
+                print("Company research capabilities will be limited.")
+        else:
+            print(f"Warning: Unknown RESEARCH_API_PROVIDER: {self.research_api_provider}")
+            print("Defaulting to Tavily for company research.")
+            self.research_api_provider = "tavily"
         
         self.openai_api_key = os.environ.get("OPENAI_API_KEY")
         if not self.openai_api_key:
             print("Warning: OPENAI_API_KEY environment variable not set.")
             print("Company extraction and description enrichment will be limited.")
-        
-        self.tavily_api_url = "https://api.tavily.com/search"
-        self.openai_api_url = "https://api.openai.com/v1/chat/completions"
     
     def run(self, job_description: str) -> Tuple[Dict[str, Any], str]:
         """
@@ -39,7 +52,7 @@ class CompanyResearcher:
                 2. Enriched job description with additional context
         """
         # Extract company name from job description
-        company_name = self._extract_company_name_with_openai(job_description)
+        company_name = self._extract_company_name_with_ai(job_description)
         
         if not company_name:
             company_name = self._extract_company_name(job_description)
@@ -50,12 +63,12 @@ class CompanyResearcher:
         
         print(f"Researching company: {company_name}")
         
-        # Research company using Tavily API
+        # Research company using the configured API provider
         company_info = self._research_company(company_name)
         
         # Enrich job description with company information
         enriched_description = self._enrich_job_description(job_description, company_info)
-        
+
         return company_info, enriched_description
     
     def _extract_company_name(self, job_description: str) -> str:
@@ -85,7 +98,7 @@ class CompanyResearcher:
         
         return ""
     
-    def _extract_company_name_with_openai(self, job_description: str) -> str:
+    def _extract_company_name_with_ai(self, job_description: str) -> str:
         """
         Use OpenAI to extract the company name from the job description.
         
@@ -95,10 +108,6 @@ class CompanyResearcher:
         Returns:
             str: The extracted company name
         """
-        if not self.openai_api_key:
-            print("OpenAI API key not set. Skipping AI-based company name extraction.")
-            return ""
-        
         prompt = f"""
         Extract the company name from the following job description. 
         Return ONLY the company name, nothing else.
@@ -107,34 +116,19 @@ class CompanyResearcher:
         {job_description[:2000]}  # Limit to first 2000 characters
         """
         
-        headers = {
-            "Authorization": f"Bearer {self.openai_api_key}",
-            "Content-Type": "application/json"
-        }
+        system_message = "You are a helpful assistant that extracts company names from job descriptions."
         
-        data = {
-            "model": "gpt-4o-mini",
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant that extracts company names from job descriptions."},
-                {"role": "user", "content": prompt}
-            ]
-        }
+        result = self.call_llm_api(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.2
+        )
         
-        try:
-            response = requests.post(self.openai_api_url, headers=headers, json=data)
-            if response.status_code == 200:
-                result = response.json()
-                return result["choices"][0]["message"]["content"].strip()
-            else:
-                print(f"Error from OpenAI API: {response.status_code}")
-                return ""
-        except Exception as e:
-            print(f"Exception when calling OpenAI API: {e}")
-            return ""
+        return result if result else ""
     
     def _research_company(self, company_name: str) -> Dict[str, Any]:
         """
-        Research company information using Tavily API.
+        Research company information using the configured API provider.
         
         Args:
             company_name (str): The name of the company
@@ -142,16 +136,38 @@ class CompanyResearcher:
         Returns:
             Dict[str, Any]: Information about the company
         """
+        # Default company info structure
+        company_info = {
+            "name": company_name,
+            "industry": "",
+            "description": "",
+            "values": [],
+            "products": [],
+            "tech_stack": []
+        }
+        
+        # Choose research method based on configured provider
+        if self.research_api_provider == "tavily":
+            company_info = self._research_with_tavily(company_name, company_info)
+        elif self.research_api_provider == "perplexity":
+            company_info = self._research_with_perplexity(company_name, company_info)
+        
+        return company_info
+    
+    def _research_with_tavily(self, company_name: str, company_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Research company information using Tavily API.
+        
+        Args:
+            company_name (str): The name of the company
+            company_info (Dict[str, Any]): Initial company info structure
+            
+        Returns:
+            Dict[str, Any]: Updated information about the company
+        """
         if not self.tavily_api_key:
             print("Tavily API key not set. Skipping company research.")
-            return {
-                "name": company_name,
-                "industry": "",
-                "description": "",
-                "values": [],
-                "products": [],
-                "tech_stack": []
-            }
+            return company_info
         
         # Prepare search queries for different aspects of the company
         search_queries = [
@@ -161,120 +177,175 @@ class CompanyResearcher:
             f"{company_name} technology stack tech stack"
         ]
         
-        company_info = {
-            "name": company_name,
-            "description": "",
-            "values": [],
-            "products": [],
-            "tech_stack": []
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {self.tavily_api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        try:
-            # Collect information from multiple searches
-            for query in search_queries:
-                data = {
-                    "query": query,
-                    "search_depth": "basic",
-                    "include_answer": True,
-                    "include_domains": ["linkedin.com", "bloomberg.com", "reuters.com", "techcrunch.com", "forbes.com"],
-                    "max_results": 5
-                }
+        # Collect information from multiple searches
+        for query in search_queries:
+            include_domains = ["linkedin.com", "bloomberg.com", "reuters.com", "techcrunch.com", "forbes.com"]
+            result = self.call_tavily_api(
+                query=query,
+                search_depth="basic",
+                include_domains=include_domains,
+                max_results=5
+            )
+            
+            if result and "answer" in result:
+                answer = result["answer"]
                 
-                response = requests.post(self.tavily_api_url, headers=headers, json=data)
-                if response.status_code == 200:
-                    result = response.json()
-                    
-                    # Process the search results
-                    if "answer" in result:
-                        answer = result["answer"]
-                        
-                        # Extract relevant information based on the query
-                        if "description" in query:
-                            company_info["description"] = answer
-                        elif "products" in query:
-                            company_info["products"] = [p.strip() for p in answer.split(",")]
-                        elif "culture" in query:
-                            company_info["values"] = [v.strip() for v in answer.split(",")]
-                        elif "technology" in query:
-                            company_info["tech_stack"] = [t.strip() for t in answer.split(",")]
-                    
-                    # Also process individual results for additional context
-                    if "results" in result:
-                        for res in result["results"]:
-                            if "content" in res:
-                                content = res["content"]
-                                # Extract any additional relevant information
-                                if "description" in query and not company_info["description"]:
-                                    company_info["description"] = content[:200]  # First 200 chars
-                                elif "products" in query and not company_info["products"]:
-                                    company_info["products"] = [p.strip() for p in content.split(",")[:3]]
-                                elif "culture" in query and not company_info["values"]:
-                                    company_info["values"] = [v.strip() for v in content.split(",")[:3]]
-                                elif "technology" in query and not company_info["tech_stack"]:
-                                    company_info["tech_stack"] = [t.strip() for t in content.split(",")[:3]]
-                else:
-                    print(f"Error from Tavily API: {response.status_code} {response.text}")
+                # Extract relevant information based on the query
+                if "description" in query:
+                    company_info["description"] = answer
+                elif "products" in query:
+                    company_info["products"] = [p.strip() for p in answer.split(",")]
+                elif "culture" in query:
+                    company_info["values"] = [v.strip() for v in answer.split(",")]
+                elif "tech stack" in query:
+                    company_info["tech_stack"] = [t.strip() for t in answer.split(",")]
+        
+        return company_info
+    
+    def _research_with_perplexity(self, company_name: str, company_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Research company information using Perplexity API with structured JSON output.
+        
+        Args:
+            company_name (str): The name of the company
+            company_info (Dict[str, Any]): Initial company info structure
             
+        Returns:
+            Dict[str, Any]: Updated information about the company
+        """
+        if not self.perplexity_api_key:
+            print("Perplexity API key not set. Skipping company research.")
             return company_info
-            
-        except Exception as e:
-            print(f"Exception when calling Tavily API: {e}")
-            return {"name": company_name}
+        
+        # Define JSON schema for structured output
+        json_schema = {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "A brief description of the company (about one paragraph)"
+                },
+                "industry": {
+                    "type": "string",
+                    "description": "The primary industry the company operates in"
+                },
+                "products": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of main products or services the company offers"
+                },
+                "values": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of company values, culture aspects, or mission statements"
+                },
+                "tech_stack": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of technologies and tech stack used by the company"
+                }
+            },
+            "required": ["description", "industry", "products", "values", "tech_stack"]
+        }
+        
+        # Set up response format for structured output
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "schema": json_schema
+            }
+        }
+        
+        # Create a prompt that asks for all company information at once
+        prompt = f"""
+        Research and provide detailed information about the company: {company_name}.
+        
+        Please return a structured JSON with the following information:
+        1. A brief description of the company
+        2. The industry the company operates in
+        3. Main products or services offered by the company
+        4. Company values, culture, and mission
+        5. Technologies and tech stack used by the company
+        
+        For any fields where information is not available, provide empty arrays or best guesses based on similar companies.
+        """
+        
+        system_message = "You are a research assistant providing concise, factual information about companies in a structured format."
+        
+        # Make a single API call with structured output format
+        result = self.call_llm_api(
+            prompt=prompt,
+            system_message=system_message,
+            model="sonar-pro",
+            response_format=response_format
+        )
+        
+        if result:
+            try:
+                # Parse the JSON response
+                parsed_result = json.loads(result)
+                
+                # Update company info with the research results
+                company_info["description"] = parsed_result.get("description", "")
+                company_info["industry"] = parsed_result.get("industry", "")
+                company_info["products"] = parsed_result.get("products", [])
+                company_info["values"] = parsed_result.get("values", [])
+                company_info["tech_stack"] = parsed_result.get("tech_stack", [])
+                
+            except json.JSONDecodeError as e:
+                print(f"Error parsing JSON response: {e}")
+                print(f"Raw response: {result}")
+        
+        return company_info
     
     def _enrich_job_description(self, job_description: str, company_info: Dict[str, Any]) -> str:
         """
-        Enrich the job description with company information.
+        Enrich the job description with company information using OpenAI.
         
         Args:
             job_description (str): The original job description
             company_info (Dict[str, Any]): Information about the company
             
         Returns:
-            str: Enriched job description
+            str: The enriched job description
         """
-        if not self.openai_api_key or not company_info:
+        # If we don't have sufficient company info, return the original
+        if not company_info or not company_info.get("description"):
             return job_description
         
         prompt = f"""
-        I have a job description and additional company information. 
-        Please enhance the job description by incorporating relevant company information,
-        but maintain the essence of the original job description.
+        I have a job description and additional research about {company_info.get("name", "")}. 
+        Please enrich the job description using the company research to give me a better context.
         
         Original Job Description:
         {job_description}
         
         Company Information:
-        {json.dumps(company_info, indent=2)}
+        Name: {company_info.get("name", "")}
+        Industry: {company_info.get("industry", "")}
+        Description: {company_info.get("description", "")}
+        Values: {", ".join(company_info.get("values", []))}
+        Products: {", ".join(company_info.get("products", []))}
+        Tech Stack: {", ".join(company_info.get("tech_stack", []))}
         
-        Enhanced Job Description:
+        Incorporate the information naturally as if it was part of the original description.
         """
         
-        headers = {
-            "Authorization": f"Bearer {self.openai_api_key}",
-            "Content-Type": "application/json"
-        }
+        system_message = "You are a helpful assistant that enhances job descriptions using research about the respective company."
         
-        data = {
-            "model": "gpt-4o",
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant that enhances job descriptions."},
-                {"role": "user", "content": prompt}
-            ]
-        }
+        result = self.call_llm_api(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.5
+        )
         
-        try:
-            response = requests.post(self.openai_api_url, headers=headers, json=data)
-            if response.status_code == 200:
-                result = response.json()
-                return result["choices"][0]["message"]["content"].strip()
-            else:
-                print(f"Error from OpenAI API: {response.status_code}")
-                return job_description
-        except Exception as e:
-            print(f"Exception when calling OpenAI API: {e}")
+        if result:
+            return result
+        else:
             return job_description 

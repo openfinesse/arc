@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
-import os
-import requests
 import json
-import re  # Import re for regex operations
+import re
 from typing import Dict, Any
 
-class ContentReviewer:
+from .base_agent import Agent
+
+class ContentReviewer(Agent):
     """
     Agent responsible for reviewing the overall content for relevance and narrative
     across all selected positions and constructed sentences.
     """
     
     def __init__(self):
-        # Get API key from environment variable for OpenAI (or alternative service)
-        self.api_key = os.environ.get("OPENAI_API_KEY")
-        if not self.api_key:
-            print("Warning: OPENAI_API_KEY environment variable not set.")
-            print("Content review will be limited.")
-        
-        self.api_url = "https://api.openai.com/v1/chat/completions"
-        # self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        super().__init__(name="ContentReviewer")
     
     def run(self, constructed_sentences: Dict[str, Any], job_description: str) -> Dict[str, Any]:
         """
@@ -32,7 +25,7 @@ class ContentReviewer:
         Returns:
             Dict[str, Any]: Review results and suggestions
         """
-        if not self.api_key:
+        if not self.openai_api_key:
             # Return a basic review if no API key
             return {"overall_assessment": "No review performed (API key not set)"}
         
@@ -82,7 +75,7 @@ class ContentReviewer:
         4. Missing elements: What important aspects of the job description are not covered?
         5. Redundancies: Are there any points that are redundant or could be combined?
         6. Clutter: Are there any points that are too long and can be divided into multiple points?
-        7. Job title suggestions: Based on the job description, which title variations would be most effective?
+        7. Job title suggestions: Based on the job description, which title variables would be most effective?
         
         Format your response as a JSON object with the following structure:
         ```json
@@ -105,59 +98,43 @@ class ContentReviewer:
         ```
         """
         
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        system_message = "You are a professional resume reviewer with expertise in tailoring resumes to specific job descriptions."
         
-        data = {
-            "model": "gpt-4o",
-            # "model": "deepseek/deepseek-chat-v3-0324",
-            "messages": [
-                {"role": "system", "content": "You are a professional resume reviewer with expertise in tailoring resumes to specific job descriptions."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.55  # Lower temperature for more consistent evaluation
-        }
+        content = self.call_llm_api(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.5
+        )
         
+        if not content:
+            return {"overall_assessment": "API call failed"}
+            
+        # Extract and parse the JSON from the response
         try:
-            response = requests.post(self.api_url, headers=headers, json=data)
-            if response.status_code == 200:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"].strip()
-                
-                # Extract and parse the JSON from the response
-                try:
-                    # Find JSON-like structure in the response
-                    json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
-                    if json_match:
-                        json_str = json_match.group(1)
-                    else:
-                        # Try to find JSON without the code block markers
-                        json_match = re.search(r"(\{[\s\S]*\})", content)
-                        if json_match:
-                            json_str = json_match.group(1)
-                        else:
-                            json_str = content
-                    
-                    review_results = json.loads(json_str)
-                    
-                    # Apply title recommendations if provided
-                    if "title_recommendations" in review_results:
-                        for role_idx, title in review_results["title_recommendations"].items():
-                            if role_idx in constructed_sentences:
-                                constructed_sentences[role_idx]["title"] = title
-                    
-                    return review_results
-                except Exception as e:
-                    print(f"Error parsing content review results: {e}")
-                    return {"overall_assessment": "Error parsing results", "error": str(e)}
+            # Find JSON-like structure in the response
+            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
+            if json_match:
+                json_str = json_match.group(1)
             else:
-                print(f"Error from OpenAI API: {response.status_code}")
-                return {"overall_assessment": f"API error: {response.status_code}"}
+                # Try to find JSON without the code block markers
+                json_match = re.search(r"(\{[\s\S]*\})", content)
+                if json_match:
+                    json_str = json_match.group(1)
+                else:
+                    json_str = content
+            
+            review_results = json.loads(json_str)
+            
+            # Apply title recommendations if provided
+            if "title_recommendations" in review_results:
+                for role_idx, title in review_results["title_recommendations"].items():
+                    if role_idx in constructed_sentences:
+                        constructed_sentences[role_idx]["title"] = title
+            
+            return review_results
         except Exception as e:
-            print(f"Exception when calling OpenAI API: {e}")
-            return {"overall_assessment": f"Exception: {str(e)}"}
+            print(f"Error parsing content review results: {e}")
+            return {"overall_assessment": "Error parsing results", "error": str(e)}
             
     def _update_titles_based_on_review(self, constructed_sentences: Dict[str, Any], review_results: Dict[str, Any]) -> Dict[str, Any]:
         """

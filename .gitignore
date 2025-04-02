@@ -185,9 +185,16 @@ logs/
 
 # Local configuration
 .env
+config.local.yaml
 
-outputs/*
+# Ignore all files in the output directory
+output/*
+
+# Ignore all files in the data directory
 data/*
+
+# Ignore all files in the input directory
 input/*
 
-config.local.yaml
+# Ignore all files in the .cursor directory
+.cursor/*

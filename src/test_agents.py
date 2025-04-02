@@ -50,7 +50,7 @@ def test_role_selector(resume_data: Dict[str, Any], job_description: str) -> Non
     # Print the titles of the selected roles
     for role_idx in selected_roles:
         role = resume_data["work"][role_idx]
-        titles = ", ".join(role["title_variations"])
+        titles = ", ".join(role["title_variables"])
         company = ", ".join(role["company"])
         print(f"- Role {role_idx}: {titles} at {company}")
     
@@ -66,7 +66,7 @@ def test_group_selector(resume_data: Dict[str, Any], selected_roles: list, job_d
     for role_idx in selected_roles:
         role = resume_data["work"][role_idx]
         
-        print(f"\nSelecting groups for role {role_idx} ({role['title_variations'][0]}):")
+        print(f"\nSelecting groups for role {role_idx} ({role['title_variables'][0]}):")
         
         selected_groups = agent.run(role["responsibilities_and_accomplishments"], job_description)
         
@@ -93,7 +93,7 @@ def test_sentence_constructor(resume_data: Dict[str, Any], selected_roles: list,
         role = resume_data["work"][role_idx]
         role_sentences = {}
         
-        print(f"\nConstructing sentences for role {role_idx} ({role['title_variations'][0]}):")
+        print(f"\nConstructing sentences for role {role_idx} ({role['title_variables'][0]}):")
         
         for group_name in all_selected_groups[role_idx]:
             group_data = role["responsibilities_and_accomplishments"][group_name]
@@ -106,7 +106,7 @@ def test_sentence_constructor(resume_data: Dict[str, Any], selected_roles: list,
         
         # Store the constructed sentences for this role
         constructed_sentences[role_idx] = {
-            "title": role["title_variations"][0],
+            "title": role["title_variables"][0],
             "company": role["company"][0],
             "start_date": role["start_date"],
             "end_date": role["end_date"],

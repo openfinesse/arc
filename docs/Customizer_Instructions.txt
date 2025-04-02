@@ -16,7 +16,7 @@ basics:
     
 work:
   # Choose the title variation that best fits the job description
-  - title_variations:
+  - title_variables:
       - "title_variation_1"
       - "title_variation_2"
       - "title_variation_..."
@@ -32,11 +32,11 @@ work:
       # Only construct one sentence per selected group. Replace the {placeholders} with the most relevant variation. You can also use the original sentence if it's the best fit.
       group_1:
         original_sentence: "Oversaw baked beans production, analyzed production data, and implemented new processes to increase efficiency by 20%"
-        base_sentences:
+        modular_sentence:
           - "Oversaw {production}, analyzed {data}, and implemented {processes} to {result}"
           - "Managed {production}, examined {data}, and established {processes} to {result}"
           - "Supervised {production}, evaluated {data}, and developed {processes} to {result}"
-        variations:
+        variables:
           production:
             - "baked beans production"
             - "food production operations"
@@ -64,7 +64,7 @@ Example of a valid sentence construction:
 
 Less obvious examples of valid sentence constructions:
 - Managed baked beans production, evaluated production data, and implemented process improvements to boost operational efficiency by 20%
-<!-- This sentence is valid even though the construction deviates from the outlined rules (mixes multiple variations of the base sentence; evaluated instead of examined, implemented instead of established) -->
+<!-- This sentence is valid even though the construction deviates from the outlined rules (mixes multiple variables of the base sentence; evaluated instead of examined, implemented instead of established) -->
 <!-- There may be times where specific connective words from a different base sentence are more relevant to the job description than the ones in the selected base sentence. -->
 
 - Managed baked beans production, boosting operational efficiency by 20% by examining production data and improving established processes

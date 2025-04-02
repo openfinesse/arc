@@ -1,89 +1,101 @@
 # Automated Resume Customizer (ARC)
 
-An agentic workflow system that customizes resumes for specific job applications based on a base resume in YAML format and a job description.
+An intelligent system that tailors your resume to specific job applications by analyzing the job description and selecting the most relevant content from your base resume.
 
 ## Overview
 
-This system follows a multi-step workflow to create tailored resumes:
+ARC creates customized resumes through a multi-step workflow:
 
-1. Researches the company using perplexity's sonar-pro model to augment the job description
-2. Determines which roles to include from your base resume
-3. Selects appropriate responsibility/accomplishment groups for each role
-4. Constructs and reviews sentences for readability and grammar
-5. Reviews overall content for relevance and narrative coherence
-6. Creates a resume summary tailored to the job and company
+1. Researches the company to enhance the job description with additional context
+2. Selects relevant responsibility and accomplishment groups for each role in your resume
+3. Constructs polished, targeted sentences that highlight your relevant experience
+4. Reviews sentences for clarity, grammar, and readability
+5. Reviews the overall content for relevance and narrative flow
+6. Creates a tailored resume summary that aligns with the job requirements
 
 ## Requirements
 
 - Python 3.8+
-- OpenAI API key (for most agents)
-- Tavily or Perplexity API key (for company research)
+- An OpenAI API key for core functionality
+- A Perplexity API key (default) or Tavily API key for company research
 
 ## Installation
 
 1. Clone this repository:
+
    ```bash
    git clone https://github.com/openfinesse/arc.git
    cd arc
    ```
 
 2. Install the required packages:
+
    ```bash
    pip install -r requirements.txt
    ```
 
-## Setup
+3. Create a `.env` file in the root directory with your API keys:
 
-1. Set up your API keys as environment variables:
-   ```bash
-   export OPENAI_API_KEY="your_openai_api_key"
-   export PERPLEXITY_API_KEY="your_perplexity_api_key"
-   export TAVILY_API_KEY="your_tavily_api_key"
+   ```
+   OPENAI_API_KEY=your_openai_api_key
+   PERPLEXITY_API_KEY=your_perplexity_api_key
+   # Or alternatively:
+   # TAVILY_API_KEY=your_tavily_api_key
+   # RESEARCH_API_PROVIDER=tavily
    ```
 
-2. Prepare your base resume in YAML format (see `resume_example.yaml` for an example)
+## Preparing Your Resume
 
-3. Save your job description in a text file
+ARC uses a modular YAML format for your base resume, which allows the system to mix and match content effectively. You have two options:
+
+1. **Create a resume.yaml file manually** following the structure in the example files
+2. **Let ARC create one for you** by running the system without specifying a resume file
+
+For the second option, ARC will run a modularization process to create a structured YAML file from your inputs.
 
 ## Usage
 
-Run the system with:
+Run ARC with a job description to create a customized resume:
 
 ```bash
-python src/main.py --resume resume.yaml --job-description job_description.txt --output customized_resume.md
+python -m src.main --job-description path/to/job_description.txt --output path/to/output/resume.md
 ```
 
-The system will:
-1. Load your base resume data from the YAML file
-2. Process the job description from the text file
-3. Execute the customization workflow
-4. Generate a tailored resume in Markdown format
+For a specific resume file:
 
-### Example Structure
+```bash
+python -m src.main --resume path/to/your/resume.yaml --job-description path/to/job_description.txt --output path/to/output/resume.md
+```
 
-The resume data in YAML should follow this structure:
+### Command Line Arguments
+
+- `--job-description`: Path to the job description text file (required)
+- `--output`: Path to save the customized resume (required)
+- `--resume`: Path to your resume YAML file (optional, defaults to `input/resume.yaml`)
+- `--skip-modularizer`: Skip checking for and creating a modular resume (optional)
+
+## Resume YAML Format
+
+Your resume should follow this structure:
 
 ```yaml
 basics:
-  name: "First Last"
-  email: "example@test.com"
-  # ... other personal details
+  name: "Your Name"
+  email: "your.email@example.com"
+  # Other personal details
   
 work:
-  - title_variations:
-      - "Job Title 1"
+  - title_variables:
+      - "Job Title"
       - "Alternative Title"
     start_date: "Jan 2020"
     end_date: "Present"
-    company:
-      - "Company Name"
+    company: "Company Name"
     location: "City, State"
     responsibilities_and_accomplishments:
       group_1:
-        original_sentence: "Accomplished X by doing Y which resulted in Z"
-        base_sentences:
-          - "Accomplished {X} by doing {Y} which resulted in {Z}"
-        variations:
+        modular_sentence: "Accomplished {X} by doing {Y} which resulted in {Z}"
+        variables:
           X:
             - "option 1 for X" 
             - "option 2 for X"
@@ -93,24 +105,18 @@ work:
           Z:
             - "option 1 for Z"
             - "option 2 for Z"
-      # ... more groups
-  # ... more work experiences
+      # More groups...
+  # More work experiences...
 ```
 
-## Architecture
+See `input/resume_example.yaml` for a complete example.
 
-The system uses a modular architecture with specialized agents:
+## Output
 
-- `CompanyResearcher`: Researches company info and enhances job description
-- `RoleSelector`: Selects relevant roles from your work experience
-- `GroupSelector`: Selects relevant responsibility groups for each role
-- `SentenceConstructor`: Constructs tailored sentences
-- `SentenceReviewer`: Reviews sentences for grammar and readability
-- `ContentReviewer`: Reviews overall content for relevance and narrative
-- `SummaryGenerator`: Creates a tailored resume summary
+ARC generates a customized resume in Markdown format, which you can:
 
-Each agent can be used independently or as part of the orchestrated workflow.
+- Convert to PDF using tools like Pandoc
+- Import into word processors
+- Use with Markdown-based resume templates
 
-## Customization
-
-You can modify the agent parameters in their respective files under `src/agents/`.
+The output includes a tailored professional summary and selectively highlighted experience based on the job requirements.

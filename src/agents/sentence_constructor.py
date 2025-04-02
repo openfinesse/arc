@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
-import os
-import requests
-import json
 import random
 from typing import Dict, Any, Optional, List
 
-class SentenceConstructor:
+from .base_agent import Agent
+
+class SentenceConstructor(Agent):
     """
-    Agent responsible for constructing complete sentences from base sentences and variations
+    Agent responsible for constructing complete sentences from base sentences and variables
     that are tailored to the job description.
     """
     
     def __init__(self):
-        # Get API key from environment variable for OpenAI (or alternative service)
-        self.api_key = os.environ.get("OPENAI_API_KEY")
-        if not self.api_key:
-            print("Warning: OPENAI_API_KEY environment variable not set.")
-            print("Using fallback sentence construction method.")
-        
-        self.api_url = "https://api.openai.com/v1/chat/completions"
-        # self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        super().__init__(name="SentenceConstructor")
         
         # Track sentence patterns to avoid repetition
         self.used_sentence_starters = set()
@@ -28,7 +20,7 @@ class SentenceConstructor:
     
     def run(self, group_data: Dict[str, Any], job_description: str, feedback: Optional[str] = None) -> str:
         """
-        Construct a complete sentence from base sentences and variations that is tailored to the job description.
+        Construct a complete sentence from base sentences and variables that is tailored to the job description.
         
         Args:
             group_data (Dict[str, Any]): Data for a responsibility/accomplishment group
@@ -38,9 +30,9 @@ class SentenceConstructor:
         Returns:
             str: The constructed sentence
         """
-        if not self.api_key:
+        if not self.openai_api_key:
             # Use original sentence if no API key
-            return group_data.get("original_sentence", "")
+            return self._construct_sentence_fallback(group_data)
         
         print("Constructing tailored sentence...")
         
@@ -63,25 +55,22 @@ class SentenceConstructor:
         """
         # Get values from group_data
         original_sentence = group_data.get("original_sentence", "")
-        base_sentences = group_data.get("base_sentences", [])
-        variations = group_data.get("variations", {})
+        modular_sentence = group_data.get("modular_sentence", [])
+        variables = group_data.get("variables", {})
         
-        # If no base sentences or variations, return original sentence
-        if not base_sentences or not variations:
+        # If no base sentences or variables, return original sentence
+        if not modular_sentence or not variables:
             return original_sentence
         
-        # Format the data for the prompt
-        base_sentences_str = "\n".join([f"- {sentence}" for sentence in base_sentences])
-        
-        variations_str = ""
-        for key, values in variations.items():
-            variations_str += f"\n{key}:\n"
-            variations_str += "\n".join([f"- {value}" for value in values])
+        variables_str = ""
+        for key, values in variables.items():
+            variables_str += f"\n{key}:\n"
+            variables_str += "\n".join([f"- {value}" for value in values])
         
         # Format previously generated sentences to avoid repetition
         used_patterns_str = ""
         if self.all_generated_sentences:
-            used_patterns_str = "Previously generated sentences (avoid overly similar patterns):\n"
+            used_patterns_str = "Previously generated sentences (Avoid overusing the same action verbs or phrases):\n"
             used_patterns_str += "\n".join([f"- {sentence}" for sentence in self.all_generated_sentences[-5:]])
         
         prompt = f"""
@@ -91,11 +80,11 @@ class SentenceConstructor:
         Original Sentence:
         {original_sentence}
         
-        Base Sentence Templates (choose one):
-        {base_sentences_str}
+        Modular Sentence Template:
+        {modular_sentence}
         
-        Variation Options:
-        {variations_str}
+        Available Variables:
+        {variables_str}
         
         Job Description:
         {job_description}
@@ -105,58 +94,41 @@ class SentenceConstructor:
         {'Feedback from previous attempt: ' + feedback if feedback else ''}
         
         Please construct a single sentence that:
-        1. Uses one of the base sentence templates
-        2. Replaces each {{placeholder}} with an appropriate variation
-        3. Is tailored to match keywords and themes from the job description
-        4. Does not include the company name
-        5. Flows naturally and is grammatically correct
-        6. Is professional and impactful
-        7. Try not to use the same action word or phrase to start points too much
-        9. If any of the last 2 sentences are over 25 words, ensure this one is under 20 words
-        
-        You may rearrange words slightly for better flow, but maintain the core structure of the chosen base sentence.
+        1. Has each {{placeholder}} replaced with the most relevant variable from the available variables, tailored to the job description
+        2. Does not include the company name
+        3. Flows naturally and is grammatically correct
+
+        Notes:
+        - For any option, choose the more concise variable, EXCEPT when a more verbose variable matches a part of the job description better, or when the more concise variable would make the sentence awkward or unnatural.
+        - You may cautiously rearrange words slightly in cases where not doing so would make the sentence awkward or unnatural. Maintain the core structure of the chosen modular sentence.
         
         Return ONLY the final constructed sentence with no additional explanation or commentary.
         """
         
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        system_message = "You are a helpful assistant that crafts professional resume points."
         
-        data = {
-            "model": "gpt-4o",
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant that crafts professional resume points."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.2  # Lower temperature for more consistent results
-        }
+        constructed_sentence = self.call_llm_api(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.3
+        )
         
-        try:
-            response = requests.post(self.api_url, headers=headers, json=data)
-            if response.status_code == 200:
-                result = response.json()
-                constructed_sentence = result["choices"][0]["message"]["content"].strip()
-                
-                # Clean up the response - sometimes the AI adds quotes
-                constructed_sentence = constructed_sentence.strip('"\'')
-                print(f"Constructed sentence: {constructed_sentence}")
-                
-                # Track sentence patterns
-                first_word = constructed_sentence.split()[0].lower() if constructed_sentence else ""
-                self.used_sentence_starters.add(first_word)
-                
-                # Add to list of all generated sentences
-                self.all_generated_sentences.append(constructed_sentence)
-                
-                return constructed_sentence
-            else:
-                print(f"Error from OpenAI API: {response.status_code}")
-                return original_sentence
-        except Exception as e:
-            print(f"Exception when calling OpenAI API: {e}")
-            return original_sentence
+        # If API call failed, use fallback method
+        if not constructed_sentence:
+            return self._construct_sentence_fallback(group_data)
+        
+        # Clean up the response - sometimes the AI adds quotes
+        constructed_sentence = constructed_sentence.strip('"\'')
+        print(f"Constructed sentence: {constructed_sentence}")
+        
+        # Track sentence patterns
+        first_word = constructed_sentence.split()[0].lower() if constructed_sentence else ""
+        self.used_sentence_starters.add(first_word)
+        
+        # Add to list of all generated sentences
+        self.all_generated_sentences.append(constructed_sentence)
+        
+        return constructed_sentence
             
     def _construct_sentence_fallback(self, group_data: Dict[str, Any]) -> str:
         """
@@ -169,20 +141,10 @@ class SentenceConstructor:
             str: The constructed sentence
         """
         original_sentence = group_data.get("original_sentence", "")
-        base_sentences = group_data.get("base_sentences", [])
-        variations = group_data.get("variations", {})
+        modular_sentence = group_data.get("modular_sentence", [])
+        variables = group_data.get("variables", {})
         
         if original_sentence:
             return original_sentence
-        else:
-            # Select a random base sentence
-            base_sentence = random.choice(base_sentences)
-            
-        # Replace placeholders with random variations
-        for placeholder, options in variations.items():
-            placeholder_tag = "{" + placeholder + "}"
-            if placeholder_tag in base_sentence and options:
-                replacement = random.choice(options)
-                base_sentence = base_sentence.replace(placeholder_tag, replacement)
         
-        return base_sentence 
+        return "No sentence could be constructed." 

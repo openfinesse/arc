@@ -1,23 +1,15 @@
 #!/usr/bin/env python3
-import os
-import requests
-import json
 from typing import Tuple
 
-class SentenceReviewer:
+from .base_agent import Agent
+
+class SentenceReviewer(Agent):
     """
     Agent responsible for reviewing constructed sentences for readability and grammar.
     """
     
     def __init__(self):
-        # Get API key from environment variable for OpenAI (or alternative service)
-        self.api_key = os.environ.get("OPENAI_API_KEY")
-        if not self.api_key:
-            print("Warning: OPENAI_API_KEY environment variable not set.")
-            print("Sentence review will be limited.")
-        
-        self.api_url = "https://api.openai.com/v1/chat/completions"
-        # self.api_url = "https://openrouter.ai/api/v1/chat/completions"
+        super().__init__(name="SentenceReviewer")
     
     def run(self, sentence: str) -> Tuple[bool, str]:
         """
@@ -31,7 +23,7 @@ class SentenceReviewer:
                 1. Boolean indicating if the sentence is approved
                 2. Feedback or reason for rejection
         """
-        if not self.api_key:
+        if not self.openai_api_key:
             # Default to approving all sentences if no API key
             return True, "No review performed (API key not set)"
         
@@ -98,43 +90,26 @@ class SentenceReviewer:
         FEEDBACK: [Your feedback here]
         """
         
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        system_message = "You are a professional editor who reviews resume content. Be concise in your feedback."
         
-        data = {
-            "model": "gpt-4o",
-            # "model": "deepseek/deepseek-chat-v3-0324",
-            "messages": [
-                {"role": "system", "content": "You are a professional editor who reviews resume content. Be concise in your feedback."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.4  # Lower temperature for more consistent evaluation
-        }
+        content = self.call_llm_api(
+            prompt=prompt,
+            system_message=system_message,
+            temperature=0.4
+        )
         
-        try:
-            response = requests.post(self.api_url, headers=headers, json=data)
-            if response.status_code == 200:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"].strip()
-                
-                # Parse the response to get approval status and feedback
-                approved = "APPROVED: Yes" in content or "APPROVED:Yes" in content
-                
-                # Extract feedback
-                feedback_parts = content.split("FEEDBACK:")
-                if len(feedback_parts) > 1:
-                    feedback = feedback_parts[1].strip()
-                else:
-                    feedback = "No specific feedback provided"
-                
-                return approved, feedback
-            else:
-                print(f"Error from OpenAI API: {response.status_code}")
-                # Default to approving if the API call fails
-                return True, "API call failed, defaulting to approval"
-        except Exception as e:
-            print(f"Exception when calling OpenAI API: {e}")
-            # Default to approving if an exception occurs
-            return True, f"Exception occurred: {str(e)}, defaulting to approval" 
+        if not content:
+            # Default to approving if the API call fails
+            return True, "API call failed, defaulting to approval"
+        
+        # Parse the response to get approval status and feedback
+        approved = "APPROVED: Yes" in content or "APPROVED:Yes" in content
+        
+        # Extract feedback
+        feedback_parts = content.split("FEEDBACK:")
+        if len(feedback_parts) > 1:
+            feedback = feedback_parts[1].strip()
+        else:
+            feedback = "No specific feedback provided"
+        
+        return approved, feedback 
