@@ -24,7 +24,8 @@ try:
         SentenceConstructor,
         SentenceReviewer,
         ContentReviewer,
-        SummaryGenerator
+        SummaryGenerator,
+        TitleSelector
     )
 except ImportError:
     # Fall back to absolute import (when run as a script)
@@ -37,7 +38,8 @@ except ImportError:
         SentenceConstructor,
         SentenceReviewer,
         ContentReviewer,
-        SummaryGenerator
+        SummaryGenerator,
+        TitleSelector
     )
 
 class ResumeCustomizer:
@@ -75,6 +77,7 @@ class ResumeCustomizer:
         self.sentence_reviewer = SentenceReviewer()
         self.content_reviewer = ContentReviewer()
         self.summary_generator = SummaryGenerator()
+        self.title_selector = TitleSelector()
     
     def run(self):
         """Execute the complete resume customization workflow."""
@@ -97,6 +100,9 @@ class ResumeCustomizer:
         
         for role_index in range(len(self.state["resume_data"]["work"])):
             role = self.state["resume_data"]["work"][role_index]
+            
+            # Select the most relevant title for this role
+            selected_title = self.title_selector.run(role, self.state["enriched_job_description"])
             
             # Step 3: Select relevant groups for this role
             selected_groups = self.group_selector.run(
@@ -131,11 +137,16 @@ class ResumeCustomizer:
                 
                 if is_approved:
                     role_sentences[group_name] = constructed_sentence
+                else:
+                    # Include the sentence even if not approved after 3 attempts
+                    print(f"Warning: Using sentence after {attempts} unsuccessful review attempts")
+                    print(f"Latest feedback: {feedback}")
+                    role_sentences[group_name] = constructed_sentence
             
             # Add the constructed sentences for this role
             title_index = role_index  # We'll use the same index for simplicity
             self.state["constructed_sentences"][title_index] = {
-                "title": role["title_variables"][0],  # Default to first title variation for now
+                "title": selected_title,  # Use selected title instead of default first one
                 "company": role["company"],
                 "start_date": role["start_date"],
                 "end_date": role["end_date"],
@@ -276,10 +287,52 @@ def check_and_create_modular_resume():
 def main():
     parser = argparse.ArgumentParser(description="Customize a resume for a specific job")
     parser.add_argument("--resume", help="Path to the resume YAML file")
-    parser.add_argument("--job-description", required=True, help="Path to the job description file")
-    parser.add_argument("--output", required=True, help="Path to save the customized resume")
+    parser.add_argument("--job-description", required=False, help="Path to the job description file")
+    parser.add_argument("--output", required=False, help="Path to save the customized resume")
     parser.add_argument("--skip-modularizer", action="store_true", help="Skip resume modularizer check")
+    parser.add_argument("--clear-company-cache", action="store_true", help="Clear the cached company research data")
+    parser.add_argument("--list-cached-companies", action="store_true", help="List all companies in the research cache")
     args = parser.parse_args()
+    
+    # Handle company cache commands
+    if args.clear_company_cache or args.list_cached_companies:
+        from agents import CompanyResearcher
+        researcher = CompanyResearcher()
+        
+        if args.clear_company_cache:
+            import shutil
+            if researcher.cache_dir.exists():
+                shutil.rmtree(researcher.cache_dir)
+                researcher._setup_cache_directory()
+                print(f"Company research cache cleared.")
+            else:
+                print(f"No company research cache found.")
+            return
+            
+        if args.list_cached_companies:
+            cached_companies = researcher.list_cached_companies()
+            if cached_companies:
+                print(f"\nCached company research ({len(cached_companies)} companies):")
+                print("-" * 50)
+                for i, company in enumerate(cached_companies, 1):
+                    print(f"{i}. {company['name']} - {company['industry']}")
+                    print(f"   Cached on: {company['timestamp']}")
+                    print(f"   Cache file: {company['file']}")
+                    print()
+            else:
+                print("No cached company research found.")
+            return
+    
+    # Regular resume customization requires job description and output
+    if not args.job_description:
+        print("Error: --job-description is required for resume customization.")
+        parser.print_help()
+        sys.exit(1)
+        
+    if not args.output:
+        print("Error: --output is required for resume customization.")
+        parser.print_help()
+        sys.exit(1)
     
     # Check for resume.yaml if not specified
     if not args.resume:

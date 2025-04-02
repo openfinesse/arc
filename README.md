@@ -44,6 +44,27 @@ ARC creates customized resumes through a multi-step workflow:
    # RESEARCH_API_PROVIDER=tavily
    ```
 
+   Additional configuration options:
+   ```
+   # Control how long company research is cached (in days)
+   # COMPANY_CACHE_DAYS=30
+   ```
+
+## Company Research Caching
+
+ARC now automatically caches company research results to improve performance and reduce API usage. When you run ARC for a job at a specific company, the system will:
+
+1. First check if research for this company already exists in the cache
+2. Use the cached research if it's available and not expired
+3. Perform new research only when necessary and cache the results
+
+This caching mechanism helps you:
+- Save on API costs when applying to multiple positions at the same company
+- Speed up the customization process for repeat applications
+- Reduce unnecessary API calls
+
+The cache is stored in the `cache/company_research` directory. By default, cached research expires after 30 days, but you can adjust this by setting the `COMPANY_CACHE_DAYS` environment variable.
+
 ## Preparing Your Resume
 
 ARC uses a modular YAML format for your base resume, which allows the system to mix and match content effectively. You have two options:
@@ -73,6 +94,20 @@ python -m src.main --resume path/to/your/resume.yaml --job-description path/to/j
 - `--output`: Path to save the customized resume (required)
 - `--resume`: Path to your resume YAML file (optional, defaults to `input/resume.yaml`)
 - `--skip-modularizer`: Skip checking for and creating a modular resume (optional)
+- `--clear-company-cache`: Clear all cached company research data (optional)
+- `--list-cached-companies`: List all companies in the research cache (optional)
+
+### Managing Company Research Cache
+
+You can manage the company research cache using the following commands:
+
+```bash
+# List all companies in the cache
+python -m src.main --list-cached-companies
+
+# Clear the entire company research cache
+python -m src.main --clear-company-cache
+```
 
 ## Resume YAML Format
 

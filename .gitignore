@@ -191,7 +191,9 @@ config.local.yaml
 output/*
 
 # Ignore all files in the data directory
-data/*
+data/company_research/*
+data/job_descriptions/*
+data/reference_resume/*
 
 # Ignore all files in the input directory
 input/*

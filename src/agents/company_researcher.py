@@ -2,8 +2,11 @@
 import os
 import re
 import json
+import hashlib
+from pathlib import Path
 from typing import Dict, Tuple, Any, List
 import sys
+from datetime import datetime, timedelta
 
 from .base_agent import Agent
 
@@ -38,6 +41,149 @@ class CompanyResearcher(Agent):
         if not self.openai_api_key:
             print("Warning: OPENAI_API_KEY environment variable not set.")
             print("Company extraction and description enrichment will be limited.")
+            
+        # Set up the cache directory
+        self.cache_dir = Path("data/company_research")
+        self._setup_cache_directory()
+    
+    def _setup_cache_directory(self):
+        """
+        Create the cache directory if it doesn't exist
+        """
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _get_cache_filename(self, company_name: str) -> Path:
+        """
+        Generate a cache filename for a company
+        
+        Args:
+            company_name (str): The name of the company
+            
+        Returns:
+            Path: Path to the cache file
+        """
+        # Create a hash of the company name to use as filename
+        # This avoids issues with special characters in company names
+        hash_obj = hashlib.md5(company_name.lower().encode())
+        filename = hash_obj.hexdigest() + ".json"
+        return self.cache_dir / filename
+    
+    def _load_from_cache(self, company_name: str) -> Dict[str, Any]:
+        """
+        Load company research from cache if available
+        
+        Args:
+            company_name (str): The name of the company
+            
+        Returns:
+            Dict[str, Any]: Cached company information or empty dict if not found
+        """
+        cache_file = self._get_cache_filename(company_name)
+        
+        if cache_file.exists():
+            try:
+                with cache_file.open('r') as f:
+                    cached_data = json.load(f)
+                
+                # Check if cache is expired (default: 30 days)
+                if self._is_cache_valid(cached_data):
+                    print(f"Using cached research for company: {company_name}")
+                    # Remove cache metadata from the returned data
+                    if "_cache_timestamp" in cached_data:
+                        del cached_data["_cache_timestamp"]
+                    if "_cache_company_name" in cached_data:
+                        del cached_data["_cache_company_name"]
+                    return cached_data
+                else:
+                    print(f"Cached research for {company_name} is expired, refreshing...")
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error reading cache for {company_name}: {e}")
+        
+        return {}
+    
+    def _is_cache_valid(self, cached_data: Dict[str, Any]) -> bool:
+        """
+        Check if the cached data is still valid or if it has expired
+        
+        Args:
+            cached_data (Dict[str, Any]): The cached data with timestamp
+            
+        Returns:
+            bool: True if cache is still valid, False if expired
+        """
+        # Get cache expiration time from environment variable (default: 30 days)
+        cache_days = int(os.environ.get("COMPANY_CACHE_DAYS", "30"))
+        
+        # If no timestamp is present, consider it expired
+        if "_cache_timestamp" not in cached_data:
+            return False
+            
+        try:
+            # Parse the timestamp
+            cache_time = datetime.fromisoformat(cached_data["_cache_timestamp"])
+            # Check if it's older than the expiration time
+            return datetime.now() - cache_time < timedelta(days=cache_days)
+        except (ValueError, TypeError):
+            # If there's an error parsing the timestamp, consider it expired
+            return False
+    
+    def _save_to_cache(self, company_name: str, company_info: Dict[str, Any]) -> bool:
+        """
+        Save company research to cache
+        
+        Args:
+            company_name (str): The name of the company
+            company_info (Dict[str, Any]): Company information to cache
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not company_info:
+            return False
+            
+        cache_file = self._get_cache_filename(company_name)
+        
+        try:
+            # Add timestamp to cache entry
+            cache_data = company_info.copy()
+            cache_data["_cache_timestamp"] = datetime.now().isoformat()
+            cache_data["_cache_company_name"] = company_name
+            
+            with cache_file.open('w') as f:
+                json.dump(cache_data, f, indent=2)
+            print(f"Saved company research to cache: {company_name}")
+            return True
+        except IOError as e:
+            print(f"Error saving cache for {company_name}: {e}")
+            return False
+        
+    def list_cached_companies(self) -> List[Dict[str, Any]]:
+        """
+        List all companies that have been cached
+        
+        Returns:
+            List[Dict[str, Any]]: List of cached company data summary
+        """
+        cached_companies = []
+        
+        if not self.cache_dir.exists():
+            return cached_companies
+            
+        for cache_file in self.cache_dir.glob("*.json"):
+            try:
+                with cache_file.open('r') as f:
+                    data = json.load(f)
+                    
+                cached_companies.append({
+                    "name": data.get("_cache_company_name", "Unknown"),
+                    "timestamp": data.get("_cache_timestamp", "Unknown"),
+                    "industry": data.get("industry", ""),
+                    "file": str(cache_file.name)
+                })
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Error reading cache file {cache_file}: {e}")
+                
+        return cached_companies
     
     def run(self, job_description: str) -> Tuple[Dict[str, Any], str]:
         """
@@ -61,10 +207,19 @@ class CompanyResearcher(Agent):
             print("Could not extract company name from job description.")
             return {}, job_description
         
-        print(f"Researching company: {company_name}")
+        print(f"Found company name: {company_name}")
         
-        # Research company using the configured API provider
-        company_info = self._research_company(company_name)
+        # Check cache first
+        company_info = self._load_from_cache(company_name)
+        
+        # If not in cache, perform research
+        if not company_info:
+            print(f"Researching company: {company_name}")
+            company_info = self._research_company(company_name)
+            
+            # Save the research results to cache
+            if company_info and company_info.get("description"):
+                self._save_to_cache(company_name, company_info)
         
         # Enrich job description with company information
         enriched_description = self._enrich_job_description(job_description, company_info)

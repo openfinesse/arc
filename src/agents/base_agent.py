@@ -36,7 +36,7 @@ class Agent:
     def call_llm_api(self, 
                      prompt: str, 
                      system_message: str = "", 
-                     model: str = "deepseek/deepseek-chat-v3-0324", 
+                     model: str = "gpt-4o-mini", 
                      temperature: float = 0.5,
                      response_format: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """

@@ -14,6 +14,7 @@ from .sentence_reviewer import SentenceReviewer
 from .content_reviewer import ContentReviewer
 from .summary_generator import SummaryGenerator
 from .resume_modularizer import ResumeModularizer
+from .title_selector import TitleSelector
 
 __all__ = [
     'Agent',
@@ -24,5 +25,6 @@ __all__ = [
     'SentenceReviewer',
     'ContentReviewer',
     'SummaryGenerator',
-    'ResumeModularizer'
+    'ResumeModularizer',
+    'TitleSelector'
 ] 
