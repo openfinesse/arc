@@ -9,10 +9,21 @@ for different job applications.
 import os
 import sys
 import yaml
+import asyncio
 from typing import Optional
 import argparse
 
-from agents import ResumeModularizer
+try:
+    # Try relative import
+    from .logging_config import get_logger, log_async_start, log_async_complete
+    from .agents import ResumeModularizer
+except ImportError:
+    # Try absolute import
+    from logging_config import get_logger, log_async_start, log_async_complete
+    from agents import ResumeModularizer
+
+# Get logger for this module
+logger = get_logger()
 
 def get_input_path(prompt: str, default_path: Optional[str] = None) -> Optional[str]:
     """
@@ -36,7 +47,7 @@ def get_input_path(prompt: str, default_path: Optional[str] = None) -> Optional[
     
     # Validate the file exists
     if not os.path.isfile(user_input):
-        print(f"File not found: {user_input}")
+        logger.error(f"File not found: {user_input}")
         return get_input_path(prompt, default_path)
     
     return user_input
@@ -61,7 +72,7 @@ def check_resume_simple_yaml_exists() -> bool:
     input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
     return os.path.isfile(os.path.join(input_dir, "resume_simple.yaml"))
 
-def create_modular_resume(simple_resume_path: str) -> bool:
+async def create_modular_resume(simple_resume_path: str) -> bool:
     """
     Create a modular resume from a simple resume file.
     
@@ -71,30 +82,37 @@ def create_modular_resume(simple_resume_path: str) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
+    log_async_start(logger, "create_modular_resume")
+    
     # Create the resume modularizer agent
     modularizer = ResumeModularizer()
     
     # Process the resume
-    modular_resume = modularizer.process_resume(simple_resume_path)
+    logger.info("Converting simple resume to modular format...")
+    modular_resume = await modularizer.process_resume(simple_resume_path)
     
     if not modular_resume:
-        print("Error processing the resume.")
+        logger.error("Error processing the resume.")
+        log_async_complete(logger, "create_modular_resume")
         return False
     
     # Save the modular resume
     input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
     output_path = os.path.join(input_dir, "resume.yaml")
     
-    return modularizer.save_modular_resume(modular_resume, output_path)
+    result = modularizer.save_modular_resume(modular_resume, output_path)
+    log_async_complete(logger, "create_modular_resume")
+    return result
 
 def provide_resume_simple_instructions():
     """
     Provide instructions for creating a resume_simple.yaml file.
     """
-    print("\nTo create a simple resume file for modularization:")
-    print("1. Create a file named 'resume_simple.yaml' in the 'input' directory.")
-    print("2. Follow this structure for your file:")
-    print("""
+    logger.info("\nTo create a simple resume file for modularization:")
+    logger.info("1. Create a file named 'resume_simple.yaml' in the 'input' directory.")
+    logger.info("2. Follow this structure for your file:")
+    
+    template = """
 basics:
   name: "Your Name"
   email: "your.email@example.com"
@@ -126,13 +144,17 @@ education:
     field_of_study: "Your Field"
     start_date: "2016"
     year_of_completion: "2020"
-    """)
-    print("\nOnce you've created this file, run this script again to convert it to a modular format.")
+    """
+    
+    print(template)
+    logger.info("\nOnce you've created this file, run this script again to convert it to a modular format.")
 
-def main():
+async def main_async():
     """
-    Main function to handle the resume modularization process.
+    Async main function to handle the resume modularization process.
     """
+    log_async_start(logger, "main_async")
+    
     parser = argparse.ArgumentParser(description="Convert a simple resume to a modular format")
     parser.add_argument("--simple", help="Path to the simple resume file", default=None)
     parser.add_argument("--force", action="store_true", help="Force processing even if resume.yaml exists")
@@ -140,12 +162,16 @@ def main():
     
     # Check if resume.yaml exists and handle accordingly
     if check_resume_yaml_exists() and not args.force:
-        print("A modular resume file (resume.yaml) already exists.")
+        logger.info("A modular resume file (resume.yaml) already exists.")
         response = input("Would you like to create a new modular resume? (y/N): ").strip().lower()
         
         if response not in ("y", "yes"):
-            print("Exiting without making changes.")
+            logger.info("Exiting without making changes.")
+            log_async_complete(logger, "main_async")
             return
+    
+    # Display welcome message
+    logger.info("===== Resume Modularization Tool =====")
     
     # If simple resume path was provided via command line, use it
     if args.simple and os.path.isfile(args.simple):
@@ -168,7 +194,8 @@ def main():
             )
             
             if not simple_resume_path:
-                print("No valid simple resume file provided. Exiting.")
+                logger.error("No valid simple resume file provided. Exiting.")
+                log_async_complete(logger, "main_async")
                 return
         else:
             # Ask if they want to create a modular version
@@ -179,24 +206,35 @@ def main():
                 if check_resume_simple_yaml_exists():
                     input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
                     simple_resume_path = os.path.join(input_dir, "resume_simple.yaml")
-                    print(f"Found simple resume file at: {simple_resume_path}")
+                    logger.info(f"Found simple resume file at: {simple_resume_path}")
                 else:
                     # Provide instructions for creating a simple resume file
-                    print("No simple resume file found.")
+                    logger.warning("No simple resume file found.")
                     provide_resume_simple_instructions()
+                    log_async_complete(logger, "main_async")
                     return
             else:
-                print("Exiting without making changes.")
+                logger.info("Exiting without making changes.")
+                log_async_complete(logger, "main_async")
                 return
     
     # Create the modular resume
-    success = create_modular_resume(simple_resume_path)
+    logger.info("Starting resume modularization process...")
+    success = await create_modular_resume(simple_resume_path)
     
     if success:
-        print("\nModular resume created successfully!")
-        print("You can now use this modular resume with the main application for job-specific customization.")
+        logger.info("\n✅ Modular resume created successfully!")
+        logger.info("You can now use this modular resume with the main application for job-specific customization.")
     else:
-        print("\nFailed to create modular resume. Please check the logs for errors.")
+        logger.error("\n❌ Failed to create modular resume. Please check the logs for errors.")
+    
+    log_async_complete(logger, "main_async")
+
+def main():
+    """
+    Main function that sets up and runs the async event loop.
+    """
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main() 

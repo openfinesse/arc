@@ -25,22 +25,22 @@ class CompanyResearcher(Agent):
         if self.research_api_provider == "tavily":
             self.tavily_api_key = os.environ.get("TAVILY_API_KEY")
             if not self.tavily_api_key:
-                print("Warning: TAVILY_API_KEY environment variable not set.")
-                print("Company research capabilities will be limited.")
+                self.logger.warning("TAVILY_API_KEY environment variable not set.")
+                self.logger.warning("Company research capabilities will be limited.")
         elif self.research_api_provider == "perplexity":
             self.perplexity_api_key = os.environ.get("PERPLEXITY_API_KEY")
             if not self.perplexity_api_key:
-                print("Warning: PERPLEXITY_API_KEY environment variable not set.")
-                print("Company research capabilities will be limited.")
+                self.logger.warning("PERPLEXITY_API_KEY environment variable not set.")
+                self.logger.warning("Company research capabilities will be limited.")
         else:
-            print(f"Warning: Unknown RESEARCH_API_PROVIDER: {self.research_api_provider}")
-            print("Defaulting to Tavily for company research.")
+            self.logger.warning(f"Unknown RESEARCH_API_PROVIDER: {self.research_api_provider}")
+            self.logger.warning("Defaulting to Tavily for company research.")
             self.research_api_provider = "tavily"
         
         self.openai_api_key = os.environ.get("OPENAI_API_KEY")
         if not self.openai_api_key:
-            print("Warning: OPENAI_API_KEY environment variable not set.")
-            print("Company extraction and description enrichment will be limited.")
+            self.logger.warning("OPENAI_API_KEY environment variable not set.")
+            self.logger.warning("Company extraction and description enrichment will be limited.")
             
         # Set up the cache directory
         self.cache_dir = Path("data/company_research")
@@ -51,6 +51,7 @@ class CompanyResearcher(Agent):
         Create the cache directory if it doesn't exist
         """
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.debug(f"Cache directory set up at: {self.cache_dir}")
     
     def _get_cache_filename(self, company_name: str) -> Path:
         """
@@ -87,7 +88,7 @@ class CompanyResearcher(Agent):
                 
                 # Check if cache is expired (default: 30 days)
                 if self._is_cache_valid(cached_data):
-                    print(f"Using cached research for company: {company_name}")
+                    self.logger.info(f"Using cached research for company: {company_name}")
                     # Remove cache metadata from the returned data
                     if "_cache_timestamp" in cached_data:
                         del cached_data["_cache_timestamp"]
@@ -95,9 +96,9 @@ class CompanyResearcher(Agent):
                         del cached_data["_cache_company_name"]
                     return cached_data
                 else:
-                    print(f"Cached research for {company_name} is expired, refreshing...")
+                    self.logger.info(f"Cached research for {company_name} is expired, refreshing...")
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Error reading cache for {company_name}: {e}")
+                self.logger.error(f"Error reading cache for {company_name}: {e}")
         
         return {}
     
@@ -151,18 +152,30 @@ class CompanyResearcher(Agent):
             
             with cache_file.open('w') as f:
                 json.dump(cache_data, f, indent=2)
-            print(f"Saved company research to cache: {company_name}")
+            self.logger.info(f"Saved company research to cache: {company_name}")
             return True
         except IOError as e:
-            print(f"Error saving cache for {company_name}: {e}")
+            self.logger.error(f"Error saving cache for {company_name}: {e}")
             return False
+    
+    def clear_cache(self):
+        """
+        Clear the company research cache
+        """
+        if self.cache_dir.exists():
+            import shutil
+            shutil.rmtree(self.cache_dir)
+            self._setup_cache_directory()
+            self.logger.info("Company research cache cleared.")
+        else:
+            self.logger.info("No company research cache found.")
         
-    def list_cached_companies(self) -> List[Dict[str, Any]]:
+    def list_cached_companies(self) -> List[str]:
         """
         List all companies that have been cached
         
         Returns:
-            List[Dict[str, Any]]: List of cached company data summary
+            List[str]: List of cached company names
         """
         cached_companies = []
         
@@ -174,18 +187,14 @@ class CompanyResearcher(Agent):
                 with cache_file.open('r') as f:
                     data = json.load(f)
                     
-                cached_companies.append({
-                    "name": data.get("_cache_company_name", "Unknown"),
-                    "timestamp": data.get("_cache_timestamp", "Unknown"),
-                    "industry": data.get("industry", ""),
-                    "file": str(cache_file.name)
-                })
+                company_name = data.get("_cache_company_name", "Unknown")
+                cached_companies.append(company_name)
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Error reading cache file {cache_file}: {e}")
+                self.logger.error(f"Error reading cache file {cache_file}: {e}")
                 
         return cached_companies
     
-    def run(self, job_description: str) -> Tuple[Dict[str, Any], str]:
+    async def run(self, job_description: str) -> str:
         """
         Research the company mentioned in the job description and return enriched context.
         
@@ -193,38 +202,37 @@ class CompanyResearcher(Agent):
             job_description (str): The original job description
             
         Returns:
-            Tuple[Dict[str, Any], str]: A tuple containing:
-                1. Company information as a dictionary
-                2. Enriched job description with additional context
+            str: Enriched job description with additional context
         """
         # Extract company name from job description
+        self.logger.debug("Extracting company name from job description...")
         company_name = self._extract_company_name_with_ai(job_description)
         
         if not company_name:
-            company_name = self._extract_company_name(job_description)
+            self.logger.warning("Could not extract company name from job description.")
+            return job_description
             
-        if not company_name:
-            print("Could not extract company name from job description.")
-            return {}, job_description
-        
-        print(f"Found company name: {company_name}")
+        self.logger.info(f"Found company: {company_name}")
         
         # Check cache first
         company_info = self._load_from_cache(company_name)
         
-        # If not in cache, perform research
+        # If not in cache, perform company research
         if not company_info:
-            print(f"Researching company: {company_name}")
+            self.logger.info(f"Researching company information...")
             company_info = self._research_company(company_name)
             
-            # Save the research results to cache
-            if company_info and company_info.get("description"):
+            # Save research to cache
+            if company_info:
                 self._save_to_cache(company_name, company_info)
         
-        # Enrich job description with company information
-        enriched_description = self._enrich_job_description(job_description, company_info)
-
-        return company_info, enriched_description
+        # Enrich job description with company research
+        if company_info:
+            self.logger.debug("Enriching job description with company information...")
+            enriched_description = self._enrich_job_description(job_description, company_info)
+            return enriched_description
+        
+        return job_description
     
     def _extract_company_name(self, job_description: str) -> str:
         """
@@ -321,7 +329,7 @@ class CompanyResearcher(Agent):
             Dict[str, Any]: Updated information about the company
         """
         if not self.tavily_api_key:
-            print("Tavily API key not set. Skipping company research.")
+            self.logger.warning("Tavily API key not set. Skipping company research.")
             return company_info
         
         # Prepare search queries for different aspects of the company
@@ -359,17 +367,17 @@ class CompanyResearcher(Agent):
     
     def _research_with_perplexity(self, company_name: str, company_info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Research company information using Perplexity API with structured JSON output.
+        Research a company using the Perplexity API to get additional information.
         
         Args:
             company_name (str): The name of the company
-            company_info (Dict[str, Any]): Initial company info structure
+            company_info (Dict[str, Any]): Existing company information
             
         Returns:
-            Dict[str, Any]: Updated information about the company
+            Dict[str, Any]: Updated company information
         """
         if not self.perplexity_api_key:
-            print("Perplexity API key not set. Skipping company research.")
+            self.logger.warning("Perplexity API key not set. Skipping company research.")
             return company_info
         
         # Define JSON schema for structured output
@@ -444,7 +452,7 @@ class CompanyResearcher(Agent):
         if result:
             try:
                 # Parse the JSON response
-                parsed_result = json.loads(result)
+                parsed_result = self._parse_perplexity_json(result)
                 
                 # Update company info with the research results
                 company_info["description"] = parsed_result.get("description", "")
@@ -454,10 +462,34 @@ class CompanyResearcher(Agent):
                 company_info["tech_stack"] = parsed_result.get("tech_stack", [])
                 
             except json.JSONDecodeError as e:
-                print(f"Error parsing JSON response: {e}")
-                print(f"Raw response: {result}")
+                self.logger.error(f"Error parsing JSON response: {e}")
+                self.logger.debug(f"Raw response: {result}")
         
         return company_info
+    
+    def _parse_perplexity_json(self, result: str) -> Dict[str, Any]:
+        """
+        Parse the JSON from Perplexity API response (with error handling).
+        
+        Args:
+            result (str): The JSON string to parse
+            
+        Returns:
+            Dict[str, Any]: Parsed JSON or empty dict on error
+        """
+        try:
+            # Find and extract JSON (pattern: {...})
+            import re
+            json_match = re.search(r'(\{[\s\S]*\})', result)
+            if json_match:
+                result = json_match.group(1)
+            
+            # Parse the JSON
+            return json.loads(result)
+        except Exception as e:
+            self.logger.error(f"Error parsing JSON response: {e}")
+            self.logger.debug(f"Raw response: {result}")
+            return {}
     
     def _enrich_job_description(self, job_description: str, company_info: Dict[str, Any]) -> str:
         """

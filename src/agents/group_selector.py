@@ -31,7 +31,7 @@ class GroupSelector(Agent):
             # Default to selecting all groups if no API key
             return list(responsibility_groups.keys())
         
-        print("Analyzing responsibility groups for relevance...")
+        self.logger.debug("Analyzing responsibility groups for relevance...")
         
         # Prepare data for the AI model
         group_summaries = []
@@ -47,8 +47,10 @@ class GroupSelector(Agent):
         
         # If AI selection failed or returned empty, default to all groups
         if not selected_groups:
+            self.logger.warning("AI selection failed or returned empty. Using all groups.")
             return list(responsibility_groups.keys())
         
+        self.logger.debug(f"Selected {len(selected_groups)} groups out of {len(responsibility_groups)}")
         return selected_groups
     
     def _select_groups_with_ai(self, group_summaries: List[str], group_names: List[str], job_description: str, min_groups: int) -> List[str]:

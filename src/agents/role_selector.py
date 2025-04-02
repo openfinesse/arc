@@ -5,105 +5,130 @@ from .base_agent import Agent
 
 class RoleSelector(Agent):
     """
-    Agent responsible for selecting which roles from the resume are most relevant 
-    to the job description.
+    Agent responsible for selecting which roles from the resume are most 
+    relevant to the job description.
     """
     
     def __init__(self):
         super().__init__(name="RoleSelector")
     
-    def run(self, work_experience: List[Dict[str, Any]], job_description: str) -> List[int]:
+    def run(self, roles: List[Dict[str, Any]], job_description: str) -> List[int]:
         """
         Select the roles that are most relevant to the job description.
         
         Args:
-            work_experience (List[Dict[str, Any]]): List of work experience entries from the resume
+            roles (List[Dict[str, Any]]): List of work experience entries from the resume
             job_description (str): The job description (potentially enriched)
             
         Returns:
             List[int]: Indices of the selected roles
         """
+        if not roles:
+            return []
+            
         if not self.openai_api_key:
             # Default to selecting all roles if no API key
-            return list(range(len(work_experience)))
+            return list(range(len(roles)))
         
-        print("Analyzing roles for relevance to job description...")
+        self.logger.info("Analyzing roles for relevance to job description...")
         
         # Prepare data for the AI model
-        role_summaries = []
-        for i, role in enumerate(work_experience):
-            # Create a summary of each role with all title variables
-            titles = ", ".join(role["title_variables"])
-            companies = ", ".join(role["company"])
+        role_descriptions = []
+        for i, role in enumerate(roles):
+            company = ", ".join(role["company"]) if isinstance(role["company"], list) else role["company"]
             
-            # Get a sample of responsibilities for context
-            sample_resp = []
+            # Start with the title and company
+            role_description = f"Role {i+1}: {role['title_variables'][0]} at {company} ({role['start_date']} - {role['end_date']})\n"
+            
+            # Add a few responsibilities if available
             if "responsibilities_and_accomplishments" in role:
-                for group_name, group_data in role["responsibilities_and_accomplishments"].items():
-                    if "original_sentence" in group_data:
-                        sample_resp.append(group_data["original_sentence"])
+                role_description += "Sample responsibilities:\n"
+                
+                # Check if the responsibilities are in the old or new format
+                resp = role["responsibilities_and_accomplishments"]
+                if isinstance(resp, dict):
+                    # New format (dict with group keys)
+                    sample_count = 0
+                    for group_name, group_data in resp.items():
+                        if "original_sentence" in group_data and sample_count < 3:
+                            role_description += f"- {group_data['original_sentence']}\n"
+                            sample_count += 1
+                elif isinstance(resp, list):
+                    # Old format (list of strings)
+                    for i, r in enumerate(resp[:3]):
+                        role_description += f"- {r}\n"
             
-            role_summary = f"Role {i+1}: {titles} at {companies}, {role['start_date']} to {role['end_date']}.\n"
-            if sample_resp:
-                role_summary += "Sample responsibilities: " + "; ".join(sample_resp[:3]) + "\n"
+            role_descriptions.append(role_description)
             
-            role_summaries.append(role_summary)
+        # Calculate the minimum number of roles to include (1 role for <3 roles, otherwise half rounded up)
+        min_roles = 1 if len(roles) < 3 else (len(roles) + 1) // 2
         
         # Use AI to select relevant roles
-        selected_indices = self._select_roles_with_ai(role_summaries, job_description)
+        selected_indices = self._select_roles_with_ai(role_descriptions, job_description, min_roles)
         
-        # If AI selection failed or returned empty, default to all roles
+        # If AI selection failed, default to all roles
         if not selected_indices:
-            return list(range(len(work_experience)))
+            self.logger.warning("Role selection failed. Using all roles.")
+            return list(range(len(roles)))
         
+        self.logger.debug(f"Selected {len(selected_indices)} roles out of {len(roles)}")
         return selected_indices
     
-    def _select_roles_with_ai(self, role_summaries: List[str], job_description: str) -> List[int]:
+    def _select_roles_with_ai(self, role_descriptions: List[str], job_description: str, min_roles: int) -> List[int]:
         """
         Use AI to select the most relevant roles based on the job description.
         
         Args:
-            role_summaries (List[str]): Summaries of each role
+            role_descriptions (List[str]): Descriptions of each role
             job_description (str): The job description
+            min_roles (int): Minimum number of roles to select
             
         Returns:
-            List[int]: Indices of the selected roles (0-based)
+            List[int]: Indices of the selected roles
         """
         prompt = f"""
-        I'm creating a tailored resume for a job application. Below are summaries of my work experience roles, 
-        followed by the job description. Please select the roles that should be included in my resume.
+        I'm creating a tailored resume for a job application. Below are my roles/jobs, followed by the job description. 
+        Please select which roles are most relevant to include for this job application.
         
-        Work Experience:
-        {"".join(role_summaries)}
+        My Roles:
+        {chr(10).join(role_descriptions)}
         
         Job Description:
         {job_description}
         
-        Please analyze the job description and select the roles that match the required skills, experience, 
-        and responsibilities. Return only the role numbers of the selected roles, with no additional text. 
-        Exclude roles that are irrelevant.
+        You must select at least {min_roles} roles, but can select more if they're relevant. Consider factors like:
+        - Skills and responsibilities that match the job requirements
+        - Recent roles that demonstrate relevant experience
+        - Technical expertise or domain knowledge relevant to the position
+        
+        Return only the numbers of the selected roles, with no additional text.
         """
         
-        system_message = "You are a helpful assistant that selects relevant work experience for job applications."
+        system_message = "You are a helpful assistant that selects relevant resume entries for job applications."
         
-        result = self.call_llm_api(
+        content = self.call_llm_api(
             prompt=prompt,
             system_message=system_message,
-            temperature=0.5
+            temperature=0.4
         )
         
-        if not result:
+        if not content:
             return []
             
-        # Parse the response to get role indices
-        # Remove any non-numeric characters except commas
-        content = ''.join(c for c in result if c.isdigit() or c == ',')
+        # Parse the response to get the role indices
+        selected_indices = []
         
-        # Split by comma and convert to integers, then subtract 1 for 0-based indexing
-        selected_indices = [int(idx.strip()) - 1 for idx in content.split(',') if idx.strip()]
+        # Extract digits, assuming the AI returned something like "1, 3, 4" or "Role 1, Role 3, Role 4"
+        import re
+        for match in re.finditer(r'\b(\d+)\b', content):
+            try:
+                index = int(match.group(1)) - 1  # Convert to 0-based index
+                if 0 <= index < len(role_descriptions):
+                    selected_indices.append(index)
+            except ValueError:
+                continue
         
-        # Validate indices are within range
-        max_index = len(role_summaries) - 1
-        selected_indices = [idx for idx in selected_indices if 0 <= idx <= max_index]
+        # Remove duplicates and sort
+        selected_indices = sorted(list(set(selected_indices)))
         
         return selected_indices 

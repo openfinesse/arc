@@ -3,7 +3,15 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+# This will NOT overwrite existing environment variables by default
+# We need to set override=True to make .env take precedence
+load_dotenv(override=True)
+
+# Import logging after env is loaded but before checking keys
+from logging_config import get_logger
+
+# Get a logger for this module
+logger = get_logger()
 
 # Export load_dotenv for other modules to use
 __all__ = ['load_dotenv', 'OPENAI_API_KEY', 'TAVILY_API_KEY', 'ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY', 'RESEARCH_API_PROVIDER', 'MAX_RETRIES', 'REQUEST_TIMEOUT']
@@ -20,16 +28,16 @@ RESEARCH_API_PROVIDER = os.environ.get("RESEARCH_API_PROVIDER", "perplexity").lo
 
 # Check if API keys are set
 if not OPENAI_API_KEY:
-    print("Warning: OPENAI_API_KEY is not set in the environment.")
-    print("Some functionality will be limited.")
+    logger.warning("OPENAI_API_KEY is not set in the environment.")
+    logger.warning("Some functionality will be limited.")
 
 if RESEARCH_API_PROVIDER == "tavily" and not TAVILY_API_KEY:
-    print("Warning: TAVILY_API_KEY is not set in the environment.")
-    print("Company research capabilities will be limited.")
+    logger.warning("TAVILY_API_KEY is not set in the environment.")
+    logger.warning("Company research capabilities will be limited.")
 
 if RESEARCH_API_PROVIDER == "perplexity" and not PERPLEXITY_API_KEY:
-    print("Warning: PERPLEXITY_API_KEY is not set in the environment.")
-    print("Company research capabilities will be limited.")
+    logger.warning("PERPLEXITY_API_KEY is not set in the environment.")
+    logger.warning("Company research capabilities will be limited.")
 
 # Other configurations
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))

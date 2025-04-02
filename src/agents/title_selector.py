@@ -12,7 +12,7 @@ class TitleSelector(Agent):
     def __init__(self):
         super().__init__(name="TitleSelector")
     
-    def run(self, role: Dict[str, Any], job_description: str) -> str:
+    async def run(self, role: Dict[str, Any], job_description: str) -> str:
         """
         Select the most relevant title for a role based on the job description.
         
@@ -31,7 +31,7 @@ class TitleSelector(Agent):
             # Default to first title if no API key
             return role["title_variables"][0]
         
-        print("Selecting the most relevant title for role...")
+        self.logger.debug("Selecting the most relevant title for role...")
         
         # Prepare data for the AI model
         title_variables = role["title_variables"]
@@ -45,15 +45,17 @@ class TitleSelector(Agent):
                     sample_resp.append(group_data["original_sentence"])
         
         # Use AI to select relevant title
-        selected_title = self._select_title_with_ai(title_variables, company, sample_resp, job_description)
+        selected_title = await self._select_title_with_ai(title_variables, company, sample_resp, job_description)
         
         # If AI selection failed, default to first title
         if not selected_title:
+            self.logger.warning("Title selection failed. Using default title.")
             return title_variables[0]
         
+        self.logger.debug(f"Selected title: {selected_title}")
         return selected_title
     
-    def _select_title_with_ai(self, title_variables: List[str], company: str, responsibilities: List[str], job_description: str) -> str:
+    async def _select_title_with_ai(self, title_variables: List[str], company: str, responsibilities: List[str], job_description: str) -> str:
         """
         Use AI to select the most relevant title based on the job description.
         

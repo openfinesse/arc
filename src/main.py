@@ -4,6 +4,7 @@ import yaml
 import os
 import json
 import sys
+import asyncio
 from typing import Dict, List, Any
 import subprocess
 
@@ -16,6 +17,7 @@ if current_dir not in sys.path:
 try:
     # Try relative import (when used as a module)
     from .config import load_dotenv
+    from .logging_config import get_logger, log_async_start, log_async_complete
     from .agents import (
         Agent,
         CompanyResearcher,
@@ -30,6 +32,7 @@ try:
 except ImportError:
     # Fall back to absolute import (when run as a script)
     from config import load_dotenv
+    from logging_config import get_logger, log_async_start, log_async_complete
     from agents import (
         Agent,
         CompanyResearcher,
@@ -42,22 +45,55 @@ except ImportError:
         TitleSelector
     )
 
+# Get logger for this module
+logger = get_logger()
+
 class ResumeCustomizer:
     """Orchestrates the resume customization workflow using multiple agents."""
     
     def __init__(self, resume_path: str, job_description_path: str, output_path: str):
+        """
+        Initialize the resume customizer with paths to the resume, job description, and output file.
+        
+        Args:
+            resume_path (str): Path to the resume file (YAML)
+            job_description_path (str): Path to the job description file (TXT)
+            output_path (str): Path to save the customized resume
+        """
+        # Set up logger
+        self.logger = get_logger(self.__class__.__name__)
+        
+        # Store paths
         self.resume_path = resume_path
         self.job_description_path = job_description_path
         self.output_path = output_path
         
-        # Load resume data
-        with open(resume_path, 'r') as f:
+        # Load resume and job description
+        self.state = {}
+        self._load_resume()
+        self._load_job_description()
+        
+        # Initialize agents
+        self.company_researcher = CompanyResearcher()
+        self.group_selector = GroupSelector()
+        self.sentence_constructor = SentenceConstructor()
+        self.sentence_reviewer = SentenceReviewer()
+        self.content_reviewer = ContentReviewer()
+        self.summary_generator = SummaryGenerator()
+        self.title_selector = TitleSelector()
+        
+        # Add workflow step method from Agent base class
+        self.workflow_step = lambda step_num, total_steps, message: self.logger.info(f"[{step_num}/{total_steps}] {message}")
+        self.progress_update = lambda current, total, operation: self.logger.info(f"{operation}... ({current}/{total} complete)") if current == 1 or current == total or current % max(1, (total // 4)) == 0 else self.logger.debug(f"{operation}... ({current}/{total} complete)")
+    
+    def _load_resume(self):
+        with open(self.resume_path, 'r') as f:
             self.resume_data = yaml.safe_load(f)
-            
-        # Load job description
-        with open(job_description_path, 'r') as f:
+    
+    def _load_job_description(self):
+        with open(self.job_description_path, 'r') as f:
             self.job_description = f.read()
-            
+        
         # Initialize the state for the workflow
         self.state = {
             "resume_data": self.resume_data,
@@ -65,120 +101,230 @@ class ResumeCustomizer:
             "enriched_job_description": "",
             "selected_roles": [],
             "constructed_sentences": {},
+            "constructed_project_sentences": {},
             "final_resume": {}
         }
-        
-        # Initialize agents
-        # Each agent will automatically get API keys from environment variables
-        self.company_researcher = CompanyResearcher()
-        # self.role_selector = RoleSelector()
-        self.group_selector = GroupSelector()
-        self.sentence_constructor = SentenceConstructor()
-        self.sentence_reviewer = SentenceReviewer()
-        self.content_reviewer = ContentReviewer()
-        self.summary_generator = SummaryGenerator()
-        self.title_selector = TitleSelector()
     
-    def run(self):
+    async def run(self):
         """Execute the complete resume customization workflow."""
-        print("Starting resume customization workflow...")
+        log_async_start(self.logger, "run")
+        
+        # Define the total number of steps in our workflow
+        total_steps = 6
         
         # Step 1: Research company and enrich job description
-        print("Step 1: Researching company and enriching job description...")
-        self.state["enriched_job_description"] = self.company_researcher.run(self.state["job_description"])
+        self.workflow_step(1, total_steps, "Researching company information")
+        self.state["enriched_job_description"] = await self.company_researcher.run(self.state["job_description"])
         
-        # Step 2: Select relevant roles from resume
-        # print("Step 2: Selecting relevant roles...")
-        # self.state["selected_roles"] = self.role_selector.run(
-        #     self.state["resume_data"]["work"],
-        #     self.state["enriched_job_description"]
-        # )
-        
-        # Step 3-4: For each role, select groups and construct sentences
-        print("Step 3-4: Selecting groups and constructing sentences...")
+        # Step 2: Process resume content
+        self.workflow_step(2, total_steps, "Processing resume experiences")
         self.state["constructed_sentences"] = {}
         
+        # Process all roles concurrently
+        role_tasks = []
         for role_index in range(len(self.state["resume_data"]["work"])):
-            role = self.state["resume_data"]["work"][role_index]
-            
-            # Select the most relevant title for this role
-            selected_title = self.title_selector.run(role, self.state["enriched_job_description"])
-            
-            # Step 3: Select relevant groups for this role
-            selected_groups = self.group_selector.run(
-                role["responsibilities_and_accomplishments"],
-                self.state["enriched_job_description"]
-            )
-            
-            # Step 4a and 4b: Construct and review sentences for each selected group
-            role_sentences = {}
-            for group_name in selected_groups:
-                group_data = role["responsibilities_and_accomplishments"][group_name]
-                
-                # Step 4a: Construct sentence
-                constructed_sentence = self.sentence_constructor.run(
-                    group_data, 
-                    self.state["enriched_job_description"]
-                )
-                
-                # Step 4b: Review sentence
-                is_approved, feedback = self.sentence_reviewer.run(constructed_sentence)
-                
-                # If not approved, reconstruct the sentence
-                attempts = 1
-                while not is_approved and attempts < 3:
-                    constructed_sentence = self.sentence_constructor.run(
-                        group_data, 
-                        self.state["enriched_job_description"],
-                        feedback
-                    )
-                    is_approved, feedback = self.sentence_reviewer.run(constructed_sentence)
-                    attempts += 1
-                
-                if is_approved:
-                    role_sentences[group_name] = constructed_sentence
-                else:
-                    # Include the sentence even if not approved after 3 attempts
-                    print(f"Warning: Using sentence after {attempts} unsuccessful review attempts")
-                    print(f"Latest feedback: {feedback}")
-                    role_sentences[group_name] = constructed_sentence
-            
-            # Add the constructed sentences for this role
-            title_index = role_index  # We'll use the same index for simplicity
-            self.state["constructed_sentences"][title_index] = {
-                "title": selected_title,  # Use selected title instead of default first one
-                "company": role["company"],
-                "start_date": role["start_date"],
-                "end_date": role["end_date"],
-                "location": role["location"],
-                "sentences": role_sentences
-            }
+            role_tasks.append(self._process_role(role_index))
         
-        # Step 5: Review overall content for relevance and narrative
-        print("Step 5: Reviewing overall content...")
+        # Log progress for roles
+        total_items = len(role_tasks)
+        self.logger.info(f"Processing {total_items} work experiences...")
+        
+        role_results = await asyncio.gather(*role_tasks)
+        
+        # Add role results to state
+        for role_index, role_data in enumerate(role_results):
+            self.state["constructed_sentences"][role_index] = role_data
+            
+        # Step 3: Process projects if they exist
+        self.workflow_step(3, total_steps, "Processing projects")
+        if "projects" in self.state["resume_data"] and self.state["resume_data"]["projects"]:
+            self.state["constructed_project_sentences"] = {}
+            
+            # Process all projects concurrently
+            project_tasks = []
+            for project_index in range(len(self.state["resume_data"]["projects"])):
+                project_tasks.append(self._process_project(project_index))
+            
+            # Log progress for projects
+            total_projects = len(project_tasks)
+            self.logger.info(f"Processing {total_projects} projects...")
+            
+            project_results = await asyncio.gather(*project_tasks)
+            
+            # Add project results to state
+            for project_index, project_data in enumerate(project_results):
+                self.state["constructed_project_sentences"][project_index] = project_data
+        else:
+            self.logger.info("No projects to process")
+        
+        # Step 4: Review overall content for relevance and narrative
+        self.workflow_step(4, total_steps, "Reviewing overall resume content")
         self.state["content_review"] = self.content_reviewer.run(
             self.state["constructed_sentences"],
             self.state["enriched_job_description"]
         )
         
-        # Step 6: Generate resume summary
-        print("Step 6: Generating resume summary...")
+        # Step 5: Generate resume summary
+        self.workflow_step(5, total_steps, "Generating tailored resume summary")
         self.state["resume_summary"] = self.summary_generator.run(
             self.state["constructed_sentences"],
             self.state["enriched_job_description"]
         )
         
-        # Assemble final resume in Markdown format
+        # Step 6: Assemble final resume
+        self.workflow_step(6, total_steps, "Assembling and saving final resume")
         self.state["final_resume"] = self._assemble_markdown_resume()
         
         # Save the final resume
         with open(self.output_path, 'w') as f:
             f.write(self.state["final_resume"])
         
-        print(f"Resume customization complete!")
-        print(f"Markdown version saved to {self.output_path}")
+        self.logger.info(f"Resume customization complete!")
+        self.logger.info(f"Markdown version saved to {self.output_path}")
         
+        log_async_complete(self.logger, "run")
         return self.state["final_resume"]
+
+    async def _process_role(self, role_index):
+        """Process a single role concurrently."""
+        func_name = f"_process_role({role_index})"
+        log_async_start(self.logger, func_name)
+        
+        role = self.state["resume_data"]["work"][role_index]
+        company_name = role["company"]
+        if isinstance(company_name, list):
+            company_name = company_name[0]
+            
+        self.logger.debug(f"Processing role at {company_name}")
+        
+        # Step 1: Select relevant groups for this role
+        selected_groups = self.group_selector.run(
+            role["responsibilities_and_accomplishments"],
+            self.state["enriched_job_description"]
+        )
+        
+        # Step 2: Construct and review sentences for each selected group
+        self.logger.debug(f"Selected {len(selected_groups)} groups for {company_name}")
+        
+        # Process multiple sentences concurrently
+        sentence_tasks = []
+        for group_name in selected_groups:
+            sentence_tasks.append(self._process_sentence(role, group_name))
+        
+        sentence_results = await asyncio.gather(*sentence_tasks)
+        
+        # Combine results
+        role_sentences = {}
+        for group_name, sentence in zip(selected_groups, sentence_results):
+            role_sentences[group_name] = sentence
+        
+        # Now that we have all the sentences, select the most relevant title
+        self.logger.debug(f"Selecting title for {company_name}")
+        selected_title = await self.title_selector.run(role, self.state["enriched_job_description"])
+        
+        result = {
+            "title": selected_title,
+            "company": role["company"],
+            "start_date": role["start_date"],
+            "end_date": role["end_date"],
+            "location": role["location"],
+            "sentences": role_sentences
+        }
+        
+        log_async_complete(self.logger, func_name)
+        return result
+    
+    async def _process_sentence(self, role, group_name):
+        """Process a single sentence concurrently."""
+        # Handle both role and project data by checking for 'company' key
+        identifier = role.get('company', role.get('name', 'unknown'))
+        if isinstance(identifier, list):
+            identifier = identifier[0]
+            
+        func_name = f"_process_sentence({identifier}, {group_name})"
+        log_async_start(self.logger, func_name)
+        
+        group_data = role["responsibilities_and_accomplishments"][group_name]
+        
+        # Pre-plan action verbs if needed
+        # Keep this synchronous as per requirements
+        if not self.sentence_constructor.assigned_action_verbs:
+            self.logger.debug("Planning action verbs for all sentences...")
+            all_group_data = []
+            for role in self.state["resume_data"]["work"]:
+                for group_key, group in role["responsibilities_and_accomplishments"].items():
+                    all_group_data.append(group)
+            # Add project group data if processing projects
+            if "projects" in self.state["resume_data"]:
+                for project in self.state["resume_data"]["projects"]:
+                    for group_key, group in project["responsibilities_and_accomplishments"].items():
+                        all_group_data.append(group)
+            self.sentence_constructor.plan_action_verbs(all_group_data, self.state["enriched_job_description"])
+        
+        # Step 1: Construct sentence
+        constructed_sentence = await self.sentence_constructor.run(
+            group_data, 
+            self.state["enriched_job_description"]
+        )
+        
+        # Step 2: Review sentence
+        is_approved, feedback = await self.sentence_reviewer.run(constructed_sentence)
+        
+        # If not approved, reconstruct the sentence
+        attempts = 1
+        while not is_approved and attempts < 3:
+            self.logger.debug(f"Reconstructing sentence (attempt {attempts+1}/3)")
+            constructed_sentence = await self.sentence_constructor.run(
+                group_data, 
+                self.state["enriched_job_description"],
+                feedback
+            )
+            is_approved, feedback = await self.sentence_reviewer.run(constructed_sentence)
+            attempts += 1
+        
+        if not is_approved:
+            # Include the sentence even if not approved after 3 attempts
+            self.logger.warning(f"Using imperfect sentence after 3 attempts: {feedback}")
+        
+        log_async_complete(self.logger, func_name)
+        return constructed_sentence
+    
+    async def _process_project(self, project_index):
+        """Process a single project concurrently."""
+        func_name = f"_process_project({project_index})"
+        log_async_start(self.logger, func_name)
+        
+        project = self.state["resume_data"]["projects"][project_index]
+        
+        # Select relevant groups for this project
+        selected_groups = self.group_selector.run(
+            project["responsibilities_and_accomplishments"],
+            self.state["enriched_job_description"]
+        )
+        
+        # Construct and review sentences for each selected group
+        # Process multiple sentences concurrently
+        sentence_tasks = []
+        for group_name in selected_groups:
+            sentence_tasks.append(self._process_sentence(
+                project, 
+                group_name
+            ))
+        
+        sentence_results = await asyncio.gather(*sentence_tasks)
+        
+        # Combine results
+        project_sentences = {}
+        for group_name, sentence in zip(selected_groups, sentence_results):
+            project_sentences[group_name] = sentence
+        
+        result = {
+            "name": project["name"],
+            "sentences": project_sentences
+        }
+        
+        log_async_complete(self.logger, func_name)
+        return result
     
     def _assemble_markdown_resume(self) -> str:
         """Create the final Markdown resume from the processed data."""
@@ -223,6 +369,19 @@ class ResumeCustomizer:
                 markdown += f"- {sentence}\n"
             
             markdown += "\n"
+        
+        # Projects (if any)
+        if self.state["constructed_project_sentences"]:
+            markdown += "## Projects\n\n"
+            
+            for project_data in self.state["constructed_project_sentences"].values():
+                markdown += f"### {project_data['name']}\n\n"
+                
+                # Add bullet points for each sentence
+                for group_name, sentence in project_data["sentences"].items():
+                    markdown += f"- {sentence}\n"
+                
+                markdown += "\n"
 
         # Education
         markdown += "## Education\n\n"
@@ -251,21 +410,24 @@ class ResumeCustomizer:
         return (0, 0)  # Default for unparseable dates
 
 
-def check_and_create_modular_resume():
+async def check_and_create_modular_resume():
     """
     Check if resume.yaml exists, and run the modularizer if needed.
     
     Returns:
         bool: True if resume.yaml exists or was created, False otherwise
     """
+    log_async_start(logger, "check_and_create_modular_resume")
+    
     input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
     resume_path = os.path.join(input_dir, "resume.yaml")
     
     if os.path.isfile(resume_path):
+        log_async_complete(logger, "check_and_create_modular_resume")
         return True
     
-    print("No modular resume file (resume.yaml) found.")
-    print("Running resume modularizer to create one...")
+    logger.info("No modular resume file (resume.yaml) found.")
+    logger.info("Running resume modularizer to create one...")
     
     # Run modularize_resume.py
     modularizer_path = os.path.join(os.path.dirname(__file__), "modularize_resume.py")
@@ -275,16 +437,21 @@ def check_and_create_modular_resume():
         
         # Check if resume.yaml was created
         if os.path.isfile(resume_path):
+            log_async_complete(logger, "check_and_create_modular_resume")
             return True
         else:
-            print("Failed to create modular resume file.")
+            logger.error("Failed to create modular resume file.")
+            log_async_complete(logger, "check_and_create_modular_resume")
             return False
     except subprocess.SubprocessError as e:
-        print(f"Error running resume modularizer: {e}")
+        logger.error(f"Error running resume modularizer: {e}")
+        log_async_complete(logger, "check_and_create_modular_resume")
         return False
 
 
-def main():
+async def async_main():
+    log_async_start(logger, "async_main")
+    
     parser = argparse.ArgumentParser(description="Customize a resume for a specific job")
     parser.add_argument("--resume", help="Path to the resume YAML file")
     parser.add_argument("--job-description", required=False, help="Path to the job description file")
@@ -300,74 +467,79 @@ def main():
         researcher = CompanyResearcher()
         
         if args.clear_company_cache:
-            import shutil
-            if researcher.cache_dir.exists():
-                shutil.rmtree(researcher.cache_dir)
-                researcher._setup_cache_directory()
-                print(f"Company research cache cleared.")
-            else:
-                print(f"No company research cache found.")
+            researcher.clear_cache()
+            logger.info("Company research cache cleared.")
+            log_async_complete(logger, "async_main")
             return
-            
+        
         if args.list_cached_companies:
-            cached_companies = researcher.list_cached_companies()
-            if cached_companies:
-                print(f"\nCached company research ({len(cached_companies)} companies):")
-                print("-" * 50)
-                for i, company in enumerate(cached_companies, 1):
-                    print(f"{i}. {company['name']} - {company['industry']}")
-                    print(f"   Cached on: {company['timestamp']}")
-                    print(f"   Cache file: {company['file']}")
-                    print()
+            companies = researcher.list_cached_companies()
+            if companies:
+                logger.info("Cached company research data:")
+                for company in companies:
+                    logger.info(f" - {company}")
             else:
-                print("No cached company research found.")
+                logger.info("No cached company research data found.")
+            log_async_complete(logger, "async_main")
             return
     
-    # Regular resume customization requires job description and output
-    if not args.job_description:
-        print("Error: --job-description is required for resume customization.")
-        parser.print_help()
-        sys.exit(1)
-        
-    if not args.output:
-        print("Error: --output is required for resume customization.")
-        parser.print_help()
-        sys.exit(1)
-    
-    # Check for resume.yaml if not specified
-    if not args.resume:
+    # Get the resume file
+    if args.resume:
+        resume_path = args.resume
+    else:
         input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
-        default_resume_path = os.path.join(input_dir, "resume.yaml")
+        resume_path = os.path.join(input_dir, "resume.yaml")
         
-        if not args.skip_modularizer and not os.path.isfile(default_resume_path):
-            # Run the modularizer to create resume.yaml
-            if not check_and_create_modular_resume():
-                print("Unable to find or create resume.yaml. Please provide a resume file with --resume.")
-                sys.exit(1)
-        
-        args.resume = default_resume_path
+        # Check if resume.yaml needs to be created
+        if not args.skip_modularizer and not os.path.isfile(resume_path):
+            success = await check_and_create_modular_resume()
+            if not success:
+                logger.error("Could not find or create a modular resume file.")
+                logger.error("Please provide a valid resume file with --resume or create one manually.")
+                log_async_complete(logger, "async_main")
+                return
     
     # Check if the resume file exists
-    if not os.path.isfile(args.resume):
-        print(f"Resume file not found: {args.resume}")
-        sys.exit(1)
+    if not os.path.isfile(resume_path):
+        logger.error(f"Resume file not found: {resume_path}")
+        logger.error("Please provide a valid resume file with --resume.")
+        log_async_complete(logger, "async_main")
+        return
+    
+    # Get the job description file
+    if args.job_description:
+        job_description_path = args.job_description
+    else:
+        input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
+        job_description_path = os.path.join(input_dir, "job_description.txt")
     
     # Check if the job description file exists
-    if not os.path.isfile(args.job_description):
-        print(f"Job description file not found: {args.job_description}")
-        sys.exit(1)
+    if not os.path.isfile(job_description_path):
+        logger.error(f"Job description file not found: {job_description_path}")
+        logger.error("Please provide a valid job description file with --job-description.")
+        log_async_complete(logger, "async_main")
+        return
     
-    # Create output directory if it doesn't exist
-    output_dir = os.path.dirname(args.output)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # Get the output file
+    if args.output:
+        output_path = args.output
+    else:
+        output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "output")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "customized_resume.md")
     
-    # Run the resume customizer
-    customizer = ResumeCustomizer(args.resume, args.job_description, args.output)
-    customizer.run()
+    # Create the resume customizer and run it
+    customizer = ResumeCustomizer(resume_path, job_description_path, output_path)
+    await customizer.run()
+    
+    log_async_complete(logger, "async_main")
 
-
-if __name__ == "__main__":
+def main():
     # Ensure environment variables are loaded
     load_dotenv()
+    
+    # Run the async main function
+    asyncio.run(async_main())
+
+if __name__ == "__main__":
     main() 

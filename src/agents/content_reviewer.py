@@ -27,9 +27,10 @@ class ContentReviewer(Agent):
         """
         if not self.openai_api_key:
             # Return a basic review if no API key
+            self.logger.warning("No OpenAI API key available. Skipping content review.")
             return {"overall_assessment": "No review performed (API key not set)"}
         
-        print("Reviewing overall content...")
+        self.logger.info("Reviewing overall resume content...")
         
         return self._review_content_with_ai(constructed_sentences, job_description)
     
@@ -55,6 +56,8 @@ class ContentReviewer(Agent):
                 role_content += f"- {sentence}\n"
             
             content_for_review.append(role_content)
+        
+        self.logger.debug(f"Reviewing content for {len(constructed_sentences)} roles")
         
         prompt = f"""
         I need you to review the content of a resume that I'm tailoring for a specific job.
@@ -107,6 +110,7 @@ class ContentReviewer(Agent):
         )
         
         if not content:
+            self.logger.error("Content review API call failed")
             return {"overall_assessment": "API call failed"}
             
         # Extract and parse the JSON from the response
@@ -129,11 +133,13 @@ class ContentReviewer(Agent):
             if "title_recommendations" in review_results:
                 for role_idx, title in review_results["title_recommendations"].items():
                     if role_idx in constructed_sentences:
+                        self.logger.debug(f"Updating title for role {role_idx} to '{title}'")
                         constructed_sentences[role_idx]["title"] = title
             
+            self.logger.debug(f"Content review completed. Overall alignment: {review_results.get('overall_alignment', 'N/A')}")
             return review_results
         except Exception as e:
-            print(f"Error parsing content review results: {e}")
+            self.logger.error(f"Error parsing content review results: {e}")
             return {"overall_assessment": "Error parsing results", "error": str(e)}
             
     def _update_titles_based_on_review(self, constructed_sentences: Dict[str, Any], review_results: Dict[str, Any]) -> Dict[str, Any]:

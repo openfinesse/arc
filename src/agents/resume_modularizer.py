@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import yaml
+import asyncio
 from typing import Dict, Any, List, Optional, Union
 import copy
 
@@ -76,7 +77,7 @@ class ResumeModularizer(Agent):
         ```
         """
     
-    def run(self, bullet_point: str, group_index: int) -> Dict[str, Any]:
+    async def run(self, bullet_point: str, group_index: int) -> Dict[str, Any]:
         """
         Convert a simple resume bullet point into a modular structure.
         
@@ -88,12 +89,13 @@ class ResumeModularizer(Agent):
             Dict[str, Any]: The modular structure for this bullet point
         """
         
-        print(f"Processing bullet point {group_index}: {bullet_point[:50]}...")
+        self.logger.info(f"Processing bullet point {group_index}: {bullet_point[:50]}...")
         
-        modular_point = self._convert_bullet_point(bullet_point)
+        modular_point = await self._convert_bullet_point(bullet_point)
         
         if not modular_point:
             # Return basic structure if conversion failed
+            self.logger.warning(f"Conversion failed for bullet point {group_index}. Using basic structure.")
             return {
                 "original_sentence": bullet_point,
                 "modular_sentence": [bullet_point.replace(".", "")],
@@ -102,7 +104,7 @@ class ResumeModularizer(Agent):
         
         return modular_point
     
-    def _convert_bullet_point(self, bullet_point: str) -> Optional[Dict[str, Any]]:
+    async def _convert_bullet_point(self, bullet_point: str) -> Optional[Dict[str, Any]]:
         """
         Use AI to convert a bullet point into a modular structure.
         
@@ -116,7 +118,8 @@ class ResumeModularizer(Agent):
         
         # The 3.7 Sonnet model provides the best results for this task
         # o1-mini has also shown to produce decent results and is a cheaper option
-        response = self.call_llm_api(
+        self.logger.debug(f"Converting bullet point using claude-3-7-sonnet model")
+        response = await self.call_llm_api_async(
             prompt=prompt,
             system_message=self.system_prompt,
             model="claude-3-7-sonnet-20250219",
@@ -144,13 +147,14 @@ class ResumeModularizer(Agent):
             return parsed_yaml
             
         except Exception as e:
-            print(f"{self.name}: Error parsing conversion output: {e}")
-            print(f"Response: {response}")
+            self.logger.error(f"Error parsing conversion output: {e}")
+            self.logger.debug(f"Response: {response}")
             return None
     
-    def process_resume(self, simple_resume_path: str) -> Dict[str, Any]:
+    async def process_resume(self, simple_resume_path: str) -> Dict[str, Any]:
         """
         Process an entire resume file, converting bullet points into modular structures.
+        Uses asyncio.gather to process multiple bullet points concurrently.
         
         Args:
             simple_resume_path (str): Path to the simple resume YAML file
@@ -158,7 +162,7 @@ class ResumeModularizer(Agent):
         Returns:
             Dict[str, Any]: The modular resume structure
         """
-        print(f"Processing resume from {simple_resume_path}...")
+        self.logger.info(f"Processing resume from {simple_resume_path}...")
         
         try:
             # Load the simple resume
@@ -168,37 +172,71 @@ class ResumeModularizer(Agent):
             # Create a deep copy to modify for the modular resume
             modular_resume = copy.deepcopy(simple_resume)
             
+            # Count total work experiences and projects to process
+            total_work_exps = len(modular_resume.get("work", []))
+            total_projects = len(modular_resume.get("projects", []))
+            total_items = total_work_exps + total_projects
+            current_item = 0
+            
             # Process all work experiences
             for i, work_exp in enumerate(modular_resume.get("work", [])):
+                current_item += 1
+                company_name = work_exp.get('company', 'Unknown')
+                if isinstance(company_name, list):
+                    company_name = company_name[0]
+                self.progress_update(current_item, total_items, f"Processing work experience: {company_name}")
                 
                 # Process responsibilities and accomplishments
                 resp_and_accom = work_exp.get("responsibilities_and_accomplishments", [])
                 if isinstance(resp_and_accom, list):
                     new_resp_and_accom = {}
                     
+                    # Create tasks for concurrent processing
+                    tasks = []
                     for j, bullet in enumerate(resp_and_accom):
+                        tasks.append(self.run(bullet, j+1))
+                    
+                    # Process all bullets concurrently
+                    results = await asyncio.gather(*tasks)
+                    
+                    # Assign results to the appropriate group
+                    for j, result in enumerate(results):
                         group_key = f"group_{j+1}"
-                        new_resp_and_accom[group_key] = self.run(bullet, j+1)
+                        new_resp_and_accom[group_key] = result
                     
                     work_exp["responsibilities_and_accomplishments"] = new_resp_and_accom
             
             # Process projects if they exist
             for i, project in enumerate(modular_resume.get("projects", [])):
+                current_item += 1
+                project_name = project.get('name', 'Unknown')
+                self.progress_update(current_item, total_items, f"Processing project: {project_name}")
+                
                 resp_and_accom = project.get("responsibilities_and_accomplishments", [])
                 if isinstance(resp_and_accom, list):
                     new_resp_and_accom = {}
                     
+                    # Create tasks for concurrent processing
+                    tasks = []
                     for j, bullet in enumerate(resp_and_accom):
+                        tasks.append(self.run(bullet, j+1))
+                    
+                    # Process all bullets concurrently
+                    results = await asyncio.gather(*tasks)
+                    
+                    # Assign results to the appropriate group
+                    for j, result in enumerate(results):
                         group_key = f"group_{j+1}"
-                        new_resp_and_accom[group_key] = self.run(bullet, j+1)
+                        new_resp_and_accom[group_key] = result
                     
                     project["responsibilities_and_accomplishments"] = new_resp_and_accom
             
+            self.logger.info("Resume processing complete")
             return modular_resume
             
         except Exception as e:
-            print(f"{self.name}: Error processing resume: {e}")
-            return {}
+            self.logger.error(f"Error processing resume: {e}")
+            return None
     
     def save_modular_resume(self, modular_resume: Dict[str, Any], output_path: str) -> bool:
         """
@@ -206,18 +244,26 @@ class ResumeModularizer(Agent):
         
         Args:
             modular_resume (Dict[str, Any]): The modular resume structure
-            output_path (str): Path to save the modular resume
+            output_path (str): Path to save the YAML file
             
         Returns:
-            bool: True if saved successfully, False otherwise
+            bool: True if the save was successful, False otherwise
         """
+        if not modular_resume:
+            self.logger.error("No modular resume to save.")
+            return False
+            
         try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Save the modular resume
             with open(output_path, 'w') as file:
                 yaml.dump(modular_resume, file, default_flow_style=False, sort_keys=False)
             
-            print(f"Modular resume saved to {output_path}")
+            self.logger.info(f"Modular resume saved to {output_path}")
             return True
             
         except Exception as e:
-            print(f"{self.name}: Error saving modular resume: {e}")
+            self.logger.error(f"Error saving modular resume: {e}")
             return False 

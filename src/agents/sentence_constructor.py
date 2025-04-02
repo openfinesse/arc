@@ -13,13 +13,10 @@ class SentenceConstructor(Agent):
     def __init__(self):
         super().__init__(name="SentenceConstructor")
         
-        # Track sentence patterns to avoid repetition
-        # self.used_sentence_starters = set()
-        # self.used_sentence_structures = set()
-        # self.all_generated_sentences = []
-        self.assigned_action_verbs = {}  # Maps sentence IDs to their assigned action verbs
+        # Maps sentence IDs to their assigned action verbs
+        self.assigned_action_verbs = {}
     
-    def run(self, group_data: Dict[str, Any], job_description: str, feedback: Optional[str] = None) -> str:
+    async def run(self, group_data: Dict[str, Any], job_description: str, feedback: Optional[str] = None) -> str:
         """
         Construct a complete sentence from base sentences and variables that is tailored to the job description.
         
@@ -33,24 +30,27 @@ class SentenceConstructor(Agent):
         """
         if not self.openai_api_key:
             # Use original sentence if no API key
+            self.logger.warning("No OpenAI API key available. Using original sentence.")
             return self._construct_sentence_fallback(group_data)
         
-        print("Constructing tailored sentence...")
+        self.logger.debug("Constructing tailored sentence...")
         
         if feedback:
-            print(f"Using feedback: {feedback}")
+            self.logger.debug(f"Using feedback: {feedback}")
         
         sentence_id = group_data.get("id", "")
         # If we already have an assigned action verb for this sentence, use it
         if sentence_id and sentence_id in self.assigned_action_verbs:
-            return self._construct_sentence_with_ai(group_data, job_description, feedback, 
+            self.logger.debug(f"Using pre-assigned action verb: {self.assigned_action_verbs[sentence_id]}")
+            return await self._construct_sentence_with_ai(group_data, job_description, feedback, 
                                                    assigned_action_verb=self.assigned_action_verbs[sentence_id])
         else:
-            return self._construct_sentence_with_ai(group_data, job_description, feedback)
+            return await self._construct_sentence_with_ai(group_data, job_description, feedback)
     
     def plan_action_verbs(self, all_group_data: List[Dict[str, Any]], job_description: str) -> None:
         """
         Do a first pass to select action verbs for all sentences to avoid repetition.
+        This method remains synchronous as requested.
         
         Args:
             all_group_data (List[Dict[str, Any]]): Data for all responsibility/accomplishment groups
@@ -59,7 +59,7 @@ class SentenceConstructor(Agent):
         if not self.openai_api_key or not all_group_data:
             return
         
-        print("Planning action verbs for all sentences...")
+        self.logger.info("Planning action verbs for all sentences...")
         
         # Prepare data for each sentence
         sentence_data = []
@@ -130,7 +130,7 @@ class SentenceConstructor(Agent):
         )
         
         if not response:
-            print("Failed to plan action verbs")
+            self.logger.error("Failed to plan action verbs")
             return
         
         try:
@@ -143,11 +143,11 @@ class SentenceConstructor(Agent):
             
             action_verbs = json.loads(response)
             self.assigned_action_verbs = action_verbs
-            print(f"Planned action verbs: {action_verbs}")
+            self.logger.debug(f"Planned action verbs: {action_verbs}")
         except Exception as e:
-            print(f"Error parsing action verb planning response: {e}")
+            self.logger.error(f"Error parsing action verb planning response: {e}")
     
-    def _construct_sentence_with_ai(self, group_data: Dict[str, Any], job_description: str, 
+    async def _construct_sentence_with_ai(self, group_data: Dict[str, Any], job_description: str, 
                                     feedback: Optional[str] = None, assigned_action_verb: Optional[str] = None) -> str:
         """
         Use AI to construct a complete sentence that is tailored to the job description.
@@ -174,12 +174,6 @@ class SentenceConstructor(Agent):
         for key, values in variables.items():
             variables_str += f"\n{key}:\n"
             variables_str += "\n".join([f"- {value}" for value in values])
-        
-        # Format previously generated sentences to avoid repetition
-        # used_patterns_str = ""
-        # if self.all_generated_sentences:
-        #     used_patterns_str = "Previously generated sentences (Avoid overusing the same action verbs or phrases):\n"
-        #     used_patterns_str += "\n".join([f"- {sentence}" for sentence in self.all_generated_sentences[-5:]])
         
         assigned_verb_str = ""
         if assigned_action_verb:
@@ -219,7 +213,7 @@ class SentenceConstructor(Agent):
         
         system_message = "You are a helpful assistant that crafts professional resume points."
         
-        constructed_sentence = self.call_llm_api(
+        constructed_sentence = await self.call_llm_api_async(
             prompt=prompt,
             system_message=system_message,
             temperature=0.3
@@ -231,20 +225,13 @@ class SentenceConstructor(Agent):
         
         # Clean up the response - sometimes the AI adds quotes
         constructed_sentence = constructed_sentence.strip('"\'')
-        print(f"Constructed sentence: {constructed_sentence}")
-        
-        # Track sentence patterns
-        # first_word = constructed_sentence.split()[0].lower() if constructed_sentence else ""
-        # self.used_sentence_starters.add(first_word)
-        
-        # # Add to list of all generated sentences
-        # self.all_generated_sentences.append(constructed_sentence)
+        self.logger.debug(f"Constructed sentence: {constructed_sentence}")
         
         return constructed_sentence
             
     def _construct_sentence_fallback(self, group_data: Dict[str, Any]) -> str:
         """
-        Fallback method to return the original sentence without using AI.
+        Fallback method to construct a sentence when API calls fail.
         
         Args:
             group_data (Dict[str, Any]): Data for a responsibility/accomplishment group
@@ -252,11 +239,30 @@ class SentenceConstructor(Agent):
         Returns:
             str: The constructed sentence
         """
-        original_sentence = group_data.get("original_sentence", "")
+        # If there's an original sentence, return it
+        if "original_sentence" in group_data:
+            return group_data["original_sentence"]
+        
+        # Try to construct from modular sentence and variables
         modular_sentence = group_data.get("modular_sentence", [])
         variables = group_data.get("variables", {})
         
-        if original_sentence:
-            return original_sentence
+        if not modular_sentence:
+            self.logger.warning("No original or modular sentence available for fallback construction")
+            return "Details not available"
         
-        return "No sentence could be constructed." 
+        # Construct a basic sentence by selecting random variables
+        constructed = ""
+        for module in modular_sentence:
+            # Check if module is a variable
+            for var_name, var_values in variables.items():
+                if var_name == module and var_values:
+                    # Select a random variable value
+                    module = random.choice(var_values)
+                    break
+            
+            constructed += module + " "
+        
+        constructed_sentence = constructed.strip()
+        self.logger.debug(f"Constructed fallback sentence: {constructed_sentence}")
+        return constructed_sentence 

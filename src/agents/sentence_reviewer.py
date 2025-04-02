@@ -11,7 +11,7 @@ class SentenceReviewer(Agent):
     def __init__(self):
         super().__init__(name="SentenceReviewer")
     
-    def run(self, sentence: str) -> Tuple[bool, str]:
+    async def run(self, sentence: str) -> Tuple[bool, str]:
         """
         Review a constructed sentence for readability and grammar.
         
@@ -25,17 +25,27 @@ class SentenceReviewer(Agent):
         """
         if not self.openai_api_key:
             # Default to approving all sentences if no API key
+            self.logger.warning("No OpenAI API key available. Skipping sentence review.")
             return True, "No review performed (API key not set)"
         
-        print("Reviewing sentence...")
+        self.logger.debug("Reviewing sentence...")
+        self.logger.debug(f"Sentence to review: {sentence}")
         
         # Check for basic issues
         basic_checks_passed, basic_feedback = self._perform_basic_checks(sentence)
         if not basic_checks_passed:
+            self.logger.warning(f"Basic checks failed: {basic_feedback}")
             return False, basic_feedback
         
         # Use AI for more sophisticated review
-        return self._review_sentence_with_ai(sentence)
+        approved, feedback = await self._review_sentence_with_ai(sentence)
+        
+        if approved:
+            self.logger.debug("Sentence approved")
+        else:
+            self.logger.warning(f"Sentence rejected: {feedback}")
+            
+        return approved, feedback
     
     def _perform_basic_checks(self, sentence: str) -> Tuple[bool, str]:
         """
@@ -65,7 +75,7 @@ class SentenceReviewer(Agent):
         
         return True, "Basic checks passed"
     
-    def _review_sentence_with_ai(self, sentence: str) -> Tuple[bool, str]:
+    async def _review_sentence_with_ai(self, sentence: str) -> Tuple[bool, str]:
         """
         Use AI to review a sentence for readability and grammar.
         
@@ -92,7 +102,7 @@ class SentenceReviewer(Agent):
         
         system_message = "You are a professional editor who reviews resume content. Be concise in your feedback."
         
-        content = self.call_llm_api(
+        content = await self.call_llm_api_async(
             prompt=prompt,
             system_message=system_message,
             temperature=0.4
