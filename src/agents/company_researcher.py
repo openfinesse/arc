@@ -412,9 +412,16 @@ class CompanyResearcher(Agent):
                         "type": "string"
                     },
                     "description": "List of technologies and tech stack used by the company"
+                },
+                "trends": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of trends the company seems to be following"
                 }
             },
-            "required": ["description", "industry", "products", "values", "tech_stack"]
+            "required": ["description", "industry", "products", "values", "tech_stack", "trends"]
         }
         
         # Set up response format for structured output
@@ -435,8 +442,9 @@ class CompanyResearcher(Agent):
         3. Main products or services offered by the company
         4. Company values, culture, and mission
         5. Technologies and tech stack used by the company
+        6. Trends the company seems to be following
         
-        For any fields where information is not available, provide empty arrays or best guesses based on similar companies.
+        For any fields where information is not available, provide empty arrays.
         """
         
         system_message = "You are a research assistant providing concise, factual information about companies in a structured format."
@@ -460,7 +468,8 @@ class CompanyResearcher(Agent):
                 company_info["products"] = parsed_result.get("products", [])
                 company_info["values"] = parsed_result.get("values", [])
                 company_info["tech_stack"] = parsed_result.get("tech_stack", [])
-                
+                company_info["trends"] = parsed_result.get("trends", [])
+
             except json.JSONDecodeError as e:
                 self.logger.error(f"Error parsing JSON response: {e}")
                 self.logger.debug(f"Raw response: {result}")
@@ -509,7 +518,12 @@ class CompanyResearcher(Agent):
         prompt = f"""
         I have a job description and additional research about {company_info.get("name", "")}. 
         Please enrich the job description using the company research to give me a better context.
-        
+        Incorporate the information naturally as if it was part of the original description.
+        Be selective in the information you use to enrich the job description. Things like values, culture, and trends
+        are usually relevant. The tech stack can be relevant, but it might contain technologies that aren't relevant to the specific role.
+
+        Only return the enriched job description, don't include any explanation or other text.
+
         Original Job Description:
         {job_description}
         
@@ -520,8 +534,7 @@ class CompanyResearcher(Agent):
         Values: {", ".join(company_info.get("values", []))}
         Products: {", ".join(company_info.get("products", []))}
         Tech Stack: {", ".join(company_info.get("tech_stack", []))}
-        
-        Incorporate the information naturally as if it was part of the original description.
+        Trends: {", ".join(company_info.get("trends", []))}
         """
         
         system_message = "You are a helpful assistant that enhances job descriptions using research about the respective company."
@@ -529,7 +542,7 @@ class CompanyResearcher(Agent):
         result = self.call_llm_api(
             prompt=prompt,
             system_message=system_message,
-            temperature=0.5
+            temperature=0.4
         )
         
         if result:

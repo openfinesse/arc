@@ -117,12 +117,12 @@ class ResumeModularizer(Agent):
         prompt = bullet_point
         
         # The 3.7 Sonnet model provides the best results for this task
-        # o1-mini has also shown to produce decent results and is a cheaper option
+        # Deepseek V3 0324 and o1-mini has also shown to produce decent results and are a cheaper option
         self.logger.debug(f"Converting bullet point using claude-3-7-sonnet model")
         response = await self.call_llm_api_async(
             prompt=prompt,
             system_message=self.system_prompt,
-            model="claude-3-7-sonnet-20250219",
+            model="anthropic/claude-3.7-sonnet",
             temperature=0.5
         )
         
@@ -151,6 +151,49 @@ class ResumeModularizer(Agent):
             self.logger.debug(f"Response: {response}")
             return None
     
+    # async def _generate_tags(self, modular_structure: Dict[str, Any]) -> str:
+    #     """
+    #     Generate tags for a modular structure by extracting technologies and skills from variables.
+        
+    #     Args:
+    #         modular_structure (Dict[str, Any]): The modular structure for a resume point
+            
+    #     Returns:
+    #         str: A string of tags extracted from the variables
+    #     """
+    #     if not modular_structure or "variables" not in modular_structure:
+    #         return ""
+            
+    #     prompt = f"""
+    #     Extract all technology terms, skills, and domain-specific keywords from the following resume point variables.
+    #     Return a comma-separated list of these terms that can be used as tags to match with job descriptions.
+    #     Do not include the same technology term more than once. For example if "Azure AD", "Azure Active
+    #     Directory", and "Microsoft Azure AD" were all present, return only one of them.
+        
+    #     Original sentence: {modular_structure.get('original_sentence', '')}
+        
+    #     Variables:
+    #     {yaml.dump(modular_structure.get('variables', {}))}
+        
+    #     Return only the comma-separated list of terms, nothing else.
+    #     """
+        
+    #     system_message = "You are a helpful assistant that extracts relevant technology terms, skills, and keywords from resume data."
+        
+    #     response = await self.call_llm_api_async(
+    #         prompt=prompt,
+    #         system_message=system_message,
+    #         temperature=0.4
+    #     )
+        
+    #     if not response:
+    #         # If LLM call fails, generate basic tags from the original sentence
+    #         original = modular_structure.get('original_sentence', '')
+    #         words = original.split()
+    #         return ", ".join([word for word in words if len(word) > 3 and word[0].isupper()])
+            
+    #     return response.strip()
+
     async def process_resume(self, simple_resume_path: str) -> Dict[str, Any]:
         """
         Process an entire resume file, converting bullet points into modular structures.
@@ -205,6 +248,19 @@ class ResumeModularizer(Agent):
                         new_resp_and_accom[group_key] = result
                     
                     work_exp["responsibilities_and_accomplishments"] = new_resp_and_accom
+                    
+                    # # Generate tags for each group
+                    # self.logger.info(f"Generating tags for work experience: {company_name}")
+                    # tag_tasks = []
+                    # for group_key, group_data in work_exp["responsibilities_and_accomplishments"].items():
+                    #     tag_tasks.append((group_key, self._generate_tags(group_data)))
+                    
+                    # # Process all tag generation concurrently
+                    # tag_results = await asyncio.gather(*[task[1] for task in tag_tasks])
+                    
+                    # # Add tags to each group
+                    # for i, (group_key, _) in enumerate(tag_tasks):
+                    #     work_exp["responsibilities_and_accomplishments"][group_key]["tags"] = tag_results[i]
             
             # Process projects if they exist
             for i, project in enumerate(modular_resume.get("projects", [])):
@@ -230,6 +286,19 @@ class ResumeModularizer(Agent):
                         new_resp_and_accom[group_key] = result
                     
                     project["responsibilities_and_accomplishments"] = new_resp_and_accom
+                    
+                    # # Generate tags for each group
+                    # self.logger.info(f"Generating tags for project: {project_name}")
+                    # tag_tasks = []
+                    # for group_key, group_data in project["responsibilities_and_accomplishments"].items():
+                    #     tag_tasks.append((group_key, self._generate_tags(group_data)))
+                    
+                    # # Process all tag generation concurrently
+                    # tag_results = await asyncio.gather(*[task[1] for task in tag_tasks])
+                    
+                    # # Add tags to each group
+                    # for i, (group_key, _) in enumerate(tag_tasks):
+                    #     project["responsibilities_and_accomplishments"][group_key]["tags"] = tag_results[i]
             
             self.logger.info("Resume processing complete")
             return modular_resume

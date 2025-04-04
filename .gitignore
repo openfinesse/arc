@@ -200,3 +200,5 @@ input/*
 
 # Ignore all files in the .cursor directory
 .cursor/*
+
+test/*

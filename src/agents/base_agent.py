@@ -77,7 +77,7 @@ class Agent:
     def call_llm_api(self, 
                      prompt: str, 
                      system_message: str = "", 
-                     model: str = "gpt-4o-mini", 
+                     model: str = "anthropic/claude-3-7-sonnet", 
                      temperature: float = 0.5,
                      response_format: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """
@@ -221,7 +221,7 @@ class Agent:
     async def call_llm_api_async(self, 
                            prompt: str, 
                            system_message: str = "", 
-                           model: str = "gpt-4o-mini", 
+                           model: str = "anthropic/claude-3-7-sonnet", 
                            temperature: float = 0.5,
                            response_format: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """
@@ -230,7 +230,7 @@ class Agent:
         Args:
             prompt (str): The prompt to send to the API
             system_message (str, optional): The system message to use. Defaults to "".
-            model (str, optional): The model to use. Defaults to "gpt-4o-mini".
+            model (str, optional): The model to use. Defaults to "deepseek/deepseek-chat-v3-0324".
             temperature (float, optional): The temperature parameter. Defaults to 0.5.
             response_format (Dict[str, Any], optional): Format specification for structured outputs. Defaults to None.
             
@@ -285,7 +285,11 @@ class Agent:
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": temperature
+                "temperature": temperature,
+                "search_recency_filter": "year",
+                "web_search_options": {
+                    "search_context_size": "high"
+                }
             }
             
             # Add response_format if provided (for structured outputs)

@@ -14,7 +14,7 @@ from logging_config import get_logger
 logger = get_logger()
 
 # Export load_dotenv for other modules to use
-__all__ = ['load_dotenv', 'OPENAI_API_KEY', 'TAVILY_API_KEY', 'ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY', 'RESEARCH_API_PROVIDER', 'MAX_RETRIES', 'REQUEST_TIMEOUT']
+__all__ = ['load_dotenv', 'OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'TAVILY_API_KEY', 'ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY', 'RESEARCH_API_PROVIDER', 'MAX_RETRIES', 'REQUEST_TIMEOUT']
 
 # API Keys
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
