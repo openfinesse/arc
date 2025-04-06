@@ -97,6 +97,7 @@ class GroupSelector(Agent):
         You are a helpful assistant that selects relevant resume work experiences for job applications. 
         For a specific work role, you need to select which responsibilities and accomplishments to include. 
         The user will provide you with numbered resume points, followed by a job description. 
+        Some resume points might be nearly identical to each other, in this case only select the most relevant one from between them.
         Select the resume points that should be included based on their relevance to the job description. 
         
         You must select at least {min_groups} resume points but can select more.

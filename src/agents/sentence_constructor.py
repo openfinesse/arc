@@ -40,8 +40,8 @@ class SentenceConstructor(Agent):
         if feedback:
             self.logger.debug(f"Using feedback: {feedback}")
         
-        # Generate a unique, consistent ID for this sentence
-        sentence_id = self._generate_sentence_id(group_data)
+        # Get the sentence ID directly from the group data
+        sentence_id = f"sentence_{group_data.get('id', 'unknown')}"
         self.logger.debug(f"Using sentence ID: {sentence_id}")
         
         # Use planned_action_verbs if provided (from main.py state)
@@ -58,33 +58,6 @@ class SentenceConstructor(Agent):
         # Construct the sentence using the AI
         return await self._construct_sentence_with_ai(group_data, job_description, feedback, action_verb)
     
-    def _generate_sentence_id(self, group_data: Dict[str, Any]) -> str:
-        """
-        Generate a consistent sentence ID for a group.
-        
-        Args:
-            group_data (Dict[str, Any]): Data for a responsibility/accomplishment group
-            
-        Returns:
-            str: A consistent ID for the sentence
-        """
-        # Try to use the group's ID if available
-        if "id" in group_data:
-            return f"sentence_{group_data['id']}"
-        
-        # Use original sentence if available (most consistent)
-        if "original_sentence" in group_data:
-            sentence_hash = hashlib.md5(group_data["original_sentence"].encode()).hexdigest()[:8]
-            return f"sentence_{sentence_hash}"
-        
-        # Use first module as fallback
-        if "modular_sentence" in group_data and group_data["modular_sentence"]:
-            module_hash = hashlib.md5(group_data["modular_sentence"][0].encode()).hexdigest()[:8]
-            return f"sentence_{module_hash}"
-        
-        # Last resort - use random ID
-        return f"sentence_random_{random.randint(1000, 9999)}"
-    
     def plan_action_verbs(self, all_group_data: List[Dict[str, Any]], job_description: str) -> Dict[str, str]:
         """
         Select action verbs for selected sentence groups to avoid repetition.
@@ -99,36 +72,41 @@ class SentenceConstructor(Agent):
         if not self.openai_api_key or not all_group_data:
             return {}
         
-        self.logger.info(f"Planning action verbs for {len(all_group_data)} selected groups...")
+        self.logger.debug(f"Planning action verbs for {len(all_group_data)} groups...")
         
         # Create a mapping of numeric IDs to actual sentence IDs for translation
         numeric_to_actual_id = {}
         sentence_data = []
         
         for i, group in enumerate(all_group_data):
-            # Generate consistent ID using same function as in run()
-            sentence_id = self._generate_sentence_id(group)
+            # Get the ID directly from the group data
+            sentence_id = f"sentence_{group.get('id', f'unknown_{i}')}"
             
             # Create a simple numeric ID for the LLM
             numeric_id = f"sentence_{i+1}"
             numeric_to_actual_id[numeric_id] = sentence_id
             
             original_sentence = group.get("original_sentence", "")
-            modular_sentence = group.get("modular_sentence", [])
-            action_module = modular_sentence[0] if modular_sentence else ""
+            
+            # Properly handle the modular_sentence which is a string with placeholders
+            modular_sentence = group.get("modular_sentence", "")
+            
+            # Extract the first placeholder which typically contains the action verb
+            # Find text between first { and }
+            import re
+            action_placeholders = re.findall(r'\{([^}]+)\}', modular_sentence)
+            action_variable = action_placeholders[0] if action_placeholders else ""
             
             # Get action verb variables if available
             action_variables = []
             variables = group.get("variables", {})
-            for var_name, var_values in variables.items():
-                if var_name in action_module:
-                    action_variables = var_values
-                    break
+            if action_variable in variables:
+                action_variables = variables[action_variable]
             
             sentence_data.append({
                 "numeric_id": numeric_id,
                 "original_sentence": original_sentence,
-                "action_module": action_module,
+                "action_variable": action_variable,
                 "action_variables": action_variables,
                 "role": group.get("role", "")
             })
@@ -140,11 +118,12 @@ class SentenceConstructor(Agent):
         sentence_details = "\n\n".join([
             f"{data['numeric_id']} (Role: {data['role']}):\n" +
             f"Original: {data['original_sentence']}\n" +
-            f"Action module: {data['action_module']}\n" +
-            f"Available action variables: {', '.join(data['action_variables'])}"
+            f"Action variable: {data['action_variable']}\n" +
+            f"Available action values: {', '.join(data['action_variables'])}"
             for data in sentence_data
         ])
         
+        self.logger.debug(f"Sentence details: {sentence_details}")
         prompt = f"""
         I'm creating a tailored resume with multiple bullet points. I need to select appropriate action verbs 
         for each sentence to ensure variety and relevance to the job description.
@@ -226,23 +205,24 @@ class SentenceConstructor(Agent):
         """
         # Get values from group_data
         original_sentence = group_data.get("original_sentence", "")
-        modular_sentence = group_data.get("modular_sentence", [])
+        modular_sentence = group_data.get("modular_sentence", "")
         variables = group_data.get("variables", {}).copy()  # Create a copy to avoid modifying the original
         
-        # If no base sentences or variables, return original sentence
+        # If no modular sentence or variables, return original sentence
         if not modular_sentence or not variables:
             return original_sentence
         
         # Simplified action verb handling
         if action_verb and modular_sentence:
-            # Find the first variable in the first module (action verb)
-            first_module = modular_sentence[0]
-            for var_name in variables.keys():
-                if "{" + var_name + "}" in first_module:
+            # Extract the first variable name from the modular sentence
+            import re
+            action_placeholders = re.findall(r'\{([^}]+)\}', modular_sentence)
+            if action_placeholders:
+                action_variable = action_placeholders[0]
+                if action_variable in variables:
                     # Set the action verb directly
-                    self.logger.debug(f"Setting action verb '{action_verb}' for variable {var_name}")
-                    variables[var_name] = [action_verb]
-                    break
+                    self.logger.debug(f"Setting action verb '{action_verb}' for variable {action_variable}")
+                    variables[action_variable] = [action_verb]
         
         # Format variables for the prompt
         variables_str = ""
@@ -274,11 +254,12 @@ class SentenceConstructor(Agent):
         - You may cautiously rearrange words slightly in cases where not doing so would make the sentence awkward or unnatural. 
           Maintain the core structure of the chosen modular sentence.
         - Correct any BASIC grammatical errors, punctuation errors, and typos.
-        - If the job description makes mention of a specific technology or keyword like AI for example, 
-          and there is a variable that has the word "AI" in it, it should be considered.
+        - If the job description makes mention of a specific technology or keyword, 
+          and there is a variable that has that keyword in it, it should be considered.
         - If the job description generally focuses on a specific ecosystem like Microsoft for example, 
           and there are a group of variables from different ecosystems, none of which are explicitly mentioned in the job description, 
           it's probably better to choose the one that is from the Microsoft ecosystem.
+        - Thoroughly consider the job description, the modular sentence template, and the available variables before making selections.
         
         Return ONLY the final constructed sentence with no additional explanation or commentary.
         """
@@ -314,25 +295,28 @@ class SentenceConstructor(Agent):
             return group_data["original_sentence"]
         
         # Try to construct from modular sentence and variables
-        modular_sentence = group_data.get("modular_sentence", [])
+        modular_sentence = group_data.get("modular_sentence", "")
         variables = group_data.get("variables", {})
         
         if not modular_sentence:
             self.logger.warning("No original or modular sentence available for fallback construction")
             return "Details not available"
         
-        # Construct a basic sentence by selecting random variables
-        constructed = ""
-        for module in modular_sentence:
-            # Check if module is a variable
-            for var_name, var_values in variables.items():
-                if var_name == module and var_values:
-                    # Select a random variable value
-                    module = random.choice(var_values)
-                    break
-            
-            constructed += module + " "
+        # Construct a basic sentence by replacing variables with random values
+        constructed = modular_sentence
         
-        constructed_sentence = constructed.strip()
+        # Find all placeholder variables
+        import re
+        placeholders = re.findall(r'\{([^}]+)\}', modular_sentence)
+        
+        # Replace each placeholder with a random value from its variable options
+        for placeholder in placeholders:
+            if placeholder in variables and variables[placeholder]:
+                # Select a random value
+                replacement = random.choice(variables[placeholder])
+                # Replace the placeholder
+                constructed = constructed.replace(f"{{{placeholder}}}", replacement)
+        
+        constructed_sentence = constructed
         self.logger.debug(f"Constructed fallback sentence: {constructed_sentence}")
         return constructed_sentence 

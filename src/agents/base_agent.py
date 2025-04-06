@@ -77,7 +77,7 @@ class Agent:
     def call_llm_api(self, 
                      prompt: str, 
                      system_message: str = "", 
-                     model: str = "anthropic/claude-3-7-sonnet", 
+                     model: str = "openrouter/quasar-alpha", 
                      temperature: float = 0.5,
                      response_format: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """
@@ -100,7 +100,7 @@ class Agent:
 
         # Set the API URL, key, and provider type based on the model selected
         # OpenRouter API
-        if model.startswith("openai/") or model.startswith("anthropic/") or model.startswith("meta/") or model.startswith("google/") or model.startswith("deepseek/"):
+        if model.startswith("openai/") or model.startswith("anthropic/") or model.startswith("meta/") or model.startswith("google/") or model.startswith("deepseek/") or model.startswith("openrouter/"):
             if not self.openrouter_api_key:
                 self.logger.error(f"OpenRouter API key not set. Skipping API call.")
                 return None
@@ -221,7 +221,7 @@ class Agent:
     async def call_llm_api_async(self, 
                            prompt: str, 
                            system_message: str = "", 
-                           model: str = "anthropic/claude-3-7-sonnet", 
+                           model: str = "openrouter/quasar-alpha", 
                            temperature: float = 0.5,
                            response_format: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """
@@ -243,7 +243,7 @@ class Agent:
 
         # Set the API URL, key, and provider type based on the model selected
         # OpenRouter API
-        if model.startswith("openai/") or model.startswith("anthropic/") or model.startswith("meta/") or model.startswith("google/") or model.startswith("deepseek/"):
+        if model.startswith("openai/") or model.startswith("anthropic/") or model.startswith("meta/") or model.startswith("google/") or model.startswith("deepseek/") or model.startswith("openrouter/"):
             if not self.openrouter_api_key:
                 self.logger.error(f"OpenRouter API key not set. Skipping API call.")
                 return None

@@ -196,13 +196,13 @@ class CompanyResearcher(Agent):
     
     async def run(self, job_description: str) -> str:
         """
-        Research the company mentioned in the job description and return enriched context.
+        Research the company mentioned in the job description and return extracted job details.
         
         Args:
             job_description (str): The original job description
             
         Returns:
-            str: Enriched job description with additional context
+            str: Extracted and organized job details
         """
         # Extract company name from job description
         self.logger.debug("Extracting company name from job description...")
@@ -210,7 +210,8 @@ class CompanyResearcher(Agent):
         
         if not company_name:
             self.logger.warning("Could not extract company name from job description.")
-            return job_description
+            # Extract from job description only without company info
+            return self.extract_and_summarize_job_details(job_description, {})
             
         self.logger.info(f"Found company: {company_name}")
         
@@ -226,13 +227,14 @@ class CompanyResearcher(Agent):
             if company_info:
                 self._save_to_cache(company_name, company_info)
         
-        # Enrich job description with company research
+        # Extract and summarize job details with company research
         if company_info:
-            self.logger.debug("Enriching job description with company information...")
-            enriched_description = self._enrich_job_description(job_description, company_info)
-            return enriched_description
+            self.logger.debug("Extracting and summarizing job details...")
+            job_details = self.extract_and_summarize_job_details(job_description, company_info)
+            return job_details
         
-        return job_description
+        # Extract from job description only without company info
+        return self.extract_and_summarize_job_details(job_description, {})
     
     def _extract_company_name(self, job_description: str) -> str:
         """
@@ -500,44 +502,67 @@ class CompanyResearcher(Agent):
             self.logger.debug(f"Raw response: {result}")
             return {}
     
-    def _enrich_job_description(self, job_description: str, company_info: Dict[str, Any]) -> str:
+    def extract_and_summarize_job_details(self, job_description: str, company_info: Dict[str, Any]) -> str:
         """
-        Enrich the job description with company information using OpenAI.
+        Extract and summarize key information from the job description and company research.
         
         Args:
             job_description (str): The original job description
             company_info (Dict[str, Any]): Information about the company
             
         Returns:
-            str: The enriched job description
+            str: Organized list of key job details
         """
-        # If we don't have sufficient company info, return the original
+        # If we don't have sufficient company info, extract only from job description
         if not company_info or not company_info.get("description"):
-            return job_description
-        
-        prompt = f"""
-        I have a job description and additional research about {company_info.get("name", "")}. 
-        Please enrich the job description using the company research to give me a better context.
-        Incorporate the information naturally as if it was part of the original description.
-        Be selective in the information you use to enrich the job description. Things like values, culture, and trends
-        are usually relevant. The tech stack can be relevant, but it might contain technologies that aren't relevant to the specific role.
+            has_company_info = False
+        else:
+            has_company_info = True
+            
+        # Create prompt for extraction and summarization
+        if has_company_info:
+            prompt = f"""
+            Extract and organize key information from this job description and company research.
+            
+            Create a clean, organized list of the following categories:
+            1. Responsibilities and Job Duties
+            2. Required Skills
+            3. Technologies & Tools
+            4. Required Experience and Education
+            
+            For each category, only include relevant items from both the job description and company research.
+            Format each category with a header and bullet points.
 
-        Only return the enriched job description, don't include any explanation or other text.
+            Job Description:
+            {job_description}
+            
+            Company Information:
+            Name: {company_info.get("name", "")}
+            Industry: {company_info.get("industry", "")}
+            Description: {company_info.get("description", "")}
+            Values: {", ".join(company_info.get("values", []))}
+            Products: {", ".join(company_info.get("products", []))}
+            Tech Stack: {", ".join(company_info.get("tech_stack", []))}
+            Trends: {", ".join(company_info.get("trends", []))}
+            """
+        else:
+            prompt = f"""
+            Extract and organize key information from this job description.
+            
+            Create a clean, organized list of the following categories:
+            1. Responsibilities and Job Duties
+            2. Required Skills
+            3. Technologies & Tools
+            4. Required Experience and Education
+            
+            For each category, include only relevant items from the job description.
+            Format each category with a header and bullet points.
 
-        Original Job Description:
-        {job_description}
-        
-        Company Information:
-        Name: {company_info.get("name", "")}
-        Industry: {company_info.get("industry", "")}
-        Description: {company_info.get("description", "")}
-        Values: {", ".join(company_info.get("values", []))}
-        Products: {", ".join(company_info.get("products", []))}
-        Tech Stack: {", ".join(company_info.get("tech_stack", []))}
-        Trends: {", ".join(company_info.get("trends", []))}
-        """
-        
-        system_message = "You are a helpful assistant that enhances job descriptions using research about the respective company."
+            Job Description:
+            {job_description}
+            """
+            
+        system_message = "You are a job analyst that extracts and organizes key details from job descriptions into clear, structured formats."
         
         result = self.call_llm_api(
             prompt=prompt,
@@ -546,6 +571,8 @@ class CompanyResearcher(Agent):
         )
         
         if result:
+            self.logger.debug(f"Extracted job details: {result}")
             return result
         else:
-            return job_description 
+            # If extraction fails, return a simple message
+            return "Could not extract job details. Please review the original job description." 

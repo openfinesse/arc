@@ -99,8 +99,12 @@ class ResumeModularizer(Agent):
             return {
                 "original_sentence": bullet_point,
                 "modular_sentence": [bullet_point.replace(".", "")],
-                "variables": {}
+                "variables": {},
+                "id": f"{group_index:02d}"  # Add a zero-padded ID
             }
+        
+        # Add a simple sequential ID to the modular structure
+        modular_point["id"] = f"{group_index:02d}"  # Format as 01, 02, etc.
         
         return modular_point
     
@@ -221,6 +225,9 @@ class ResumeModularizer(Agent):
             total_items = total_work_exps + total_projects
             current_item = 0
             
+            # Keep track of the global sentence counter for sequential IDs
+            sentence_counter = 1
+            
             # Process all work experiences
             for i, work_exp in enumerate(modular_resume.get("work", [])):
                 current_item += 1
@@ -237,7 +244,9 @@ class ResumeModularizer(Agent):
                     # Create tasks for concurrent processing
                     tasks = []
                     for j, bullet in enumerate(resp_and_accom):
-                        tasks.append(self.run(bullet, j+1))
+                        # Use the global counter for ID generation
+                        tasks.append(self.run(bullet, sentence_counter))
+                        sentence_counter += 1
                     
                     # Process all bullets concurrently
                     results = await asyncio.gather(*tasks)
@@ -248,19 +257,6 @@ class ResumeModularizer(Agent):
                         new_resp_and_accom[group_key] = result
                     
                     work_exp["responsibilities_and_accomplishments"] = new_resp_and_accom
-                    
-                    # # Generate tags for each group
-                    # self.logger.info(f"Generating tags for work experience: {company_name}")
-                    # tag_tasks = []
-                    # for group_key, group_data in work_exp["responsibilities_and_accomplishments"].items():
-                    #     tag_tasks.append((group_key, self._generate_tags(group_data)))
-                    
-                    # # Process all tag generation concurrently
-                    # tag_results = await asyncio.gather(*[task[1] for task in tag_tasks])
-                    
-                    # # Add tags to each group
-                    # for i, (group_key, _) in enumerate(tag_tasks):
-                    #     work_exp["responsibilities_and_accomplishments"][group_key]["tags"] = tag_results[i]
             
             # Process projects if they exist
             for i, project in enumerate(modular_resume.get("projects", [])):
@@ -275,7 +271,9 @@ class ResumeModularizer(Agent):
                     # Create tasks for concurrent processing
                     tasks = []
                     for j, bullet in enumerate(resp_and_accom):
-                        tasks.append(self.run(bullet, j+1))
+                        # Use the global counter for ID generation
+                        tasks.append(self.run(bullet, sentence_counter))
+                        sentence_counter += 1
                     
                     # Process all bullets concurrently
                     results = await asyncio.gather(*tasks)
@@ -286,19 +284,6 @@ class ResumeModularizer(Agent):
                         new_resp_and_accom[group_key] = result
                     
                     project["responsibilities_and_accomplishments"] = new_resp_and_accom
-                    
-                    # # Generate tags for each group
-                    # self.logger.info(f"Generating tags for project: {project_name}")
-                    # tag_tasks = []
-                    # for group_key, group_data in project["responsibilities_and_accomplishments"].items():
-                    #     tag_tasks.append((group_key, self._generate_tags(group_data)))
-                    
-                    # # Process all tag generation concurrently
-                    # tag_results = await asyncio.gather(*[task[1] for task in tag_tasks])
-                    
-                    # # Add tags to each group
-                    # for i, (group_key, _) in enumerate(tag_tasks):
-                    #     project["responsibilities_and_accomplishments"][group_key]["tags"] = tag_results[i]
             
             self.logger.info("Resume processing complete")
             return modular_resume
