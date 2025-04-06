@@ -106,17 +106,51 @@ class ResumeCustomizer:
         }
     
     async def run(self):
-        """Execute the complete resume customization workflow."""
+        """Run the resume customization workflow."""
         log_async_start(self.logger, "run")
         
-        # Define the total number of steps in our workflow
         total_steps = 6
         
-        # Step 1: Research company and enrich job description
+        # Step 1: Enrich job description
         self.workflow_step(1, total_steps, "Researching company information")
         self.state["enriched_job_description"] = await self.company_researcher.run(self.state["job_description"])
         
-        # Step 2: Process resume content
+        # Do group selection first for all roles and projects
+        self.logger.info("Pre-selecting all relevant groups before processing...")
+        selected_groups_data = []
+        
+        # Store selected groups to avoid duplicate selection
+        self.state["selected_role_groups"] = {}
+        self.state["selected_project_groups"] = {}
+        
+        # Select groups for work experiences
+        for role_index, role in enumerate(self.state["resume_data"]["work"]):
+            selected_role_groups = self.group_selector.run(
+                role["responsibilities_and_accomplishments"],
+                self.state["enriched_job_description"]
+            )
+            self.state["selected_role_groups"][role_index] = selected_role_groups
+            for group_name in selected_role_groups:
+                group_data = role["responsibilities_and_accomplishments"][group_name]
+                selected_groups_data.append(group_data)
+        
+        # Select groups for projects if they exist
+        if "projects" in self.state["resume_data"] and self.state["resume_data"]["projects"]:
+            for project_index, project in enumerate(self.state["resume_data"]["projects"]):
+                selected_project_groups = self.group_selector.run(
+                    project["responsibilities_and_accomplishments"],
+                    self.state["enriched_job_description"]
+                )
+                self.state["selected_project_groups"][project_index] = selected_project_groups
+                for group_name in selected_project_groups:
+                    group_data = project["responsibilities_and_accomplishments"][group_name]
+                    selected_groups_data.append(group_data)
+        
+        # Plan action verbs for only selected groups
+        self.logger.info(f"Planning action verbs for {len(selected_groups_data)} selected groups...")
+        self.state["planned_action_verbs"] = self.sentence_constructor.plan_action_verbs(selected_groups_data, self.state["enriched_job_description"])
+        
+        # Step 2: Process resume experiences
         self.workflow_step(2, total_steps, "Processing resume experiences")
         self.state["constructed_sentences"] = {}
         
@@ -197,11 +231,8 @@ class ResumeCustomizer:
             
         self.logger.debug(f"Processing role at {company_name}")
         
-        # Step 1: Select relevant groups for this role
-        selected_groups = self.group_selector.run(
-            role["responsibilities_and_accomplishments"],
-            self.state["enriched_job_description"]
-        )
+        # Use the pre-selected groups instead of selecting again
+        selected_groups = self.state["selected_role_groups"][role_index]
         
         # Step 2: Construct and review sentences for each selected group
         self.logger.debug(f"Selected {len(selected_groups)} groups for {company_name}")
@@ -246,25 +277,13 @@ class ResumeCustomizer:
         
         group_data = role["responsibilities_and_accomplishments"][group_name]
         
-        # Pre-plan action verbs if needed
-        # Keep this synchronous as per requirements
-        if not self.sentence_constructor.assigned_action_verbs:
-            self.logger.debug("Planning action verbs for all sentences...")
-            all_group_data = []
-            for role in self.state["resume_data"]["work"]:
-                for group_key, group in role["responsibilities_and_accomplishments"].items():
-                    all_group_data.append(group)
-            # Add project group data if processing projects
-            if "projects" in self.state["resume_data"]:
-                for project in self.state["resume_data"]["projects"]:
-                    for group_key, group in project["responsibilities_and_accomplishments"].items():
-                        all_group_data.append(group)
-            self.sentence_constructor.plan_action_verbs(all_group_data, self.state["enriched_job_description"])
-        
-        # Step 1: Construct sentence
+        # Step 1: Construct sentence - only pass action verbs on first call
         constructed_sentence = await self.sentence_constructor.run(
             group_data, 
-            self.state["enriched_job_description"]
+            self.state["enriched_job_description"],
+            feedback=None,
+            # Only pass planned_action_verbs on first sentence construction
+            planned_action_verbs=self.state["planned_action_verbs"]
         )
         
         # Step 2: Review sentence
@@ -277,7 +296,9 @@ class ResumeCustomizer:
             constructed_sentence = await self.sentence_constructor.run(
                 group_data, 
                 self.state["enriched_job_description"],
-                feedback
+                feedback=feedback,
+                # Don't need to pass action verbs again as they're now stored in the SentenceConstructor
+                planned_action_verbs=None
             )
             is_approved, feedback = await self.sentence_reviewer.run(constructed_sentence)
             attempts += 1
@@ -296,11 +317,8 @@ class ResumeCustomizer:
         
         project = self.state["resume_data"]["projects"][project_index]
         
-        # Select relevant groups for this project
-        selected_groups = self.group_selector.run(
-            project["responsibilities_and_accomplishments"],
-            self.state["enriched_job_description"]
-        )
+        # Use the pre-selected groups instead of selecting again
+        selected_groups = self.state["selected_project_groups"][project_index]
         
         # Construct and review sentences for each selected group
         # Process multiple sentences concurrently

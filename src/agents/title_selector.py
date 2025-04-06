@@ -99,7 +99,7 @@ class TitleSelector(Agent):
         content = self.call_llm_api(
             prompt=prompt,
             system_message=system_message,
-            temperature=0.3
+            temperature=0.4
         )
         
         if not content:

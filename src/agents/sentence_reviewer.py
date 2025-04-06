@@ -86,18 +86,17 @@ class SentenceReviewer(Agent):
             Tuple[bool, str]: Approval status and feedback
         """
         prompt = f"""
-        Please review the following sentence from a resume for readability, grammar, and professional impact:
-        
-        "{sentence}"
-        
-        Evaluate the sentence based on grammar, spelling, punctuation, readability, and effectiveness for a resume.
-        
+        Please review the following sentence from a resume for readability, grammar, spelling and punctuation.
+        The sentence should remain as one sentence. There are to be no periods.
         If the sentence has issues, please explain what they are and provide specific feedback for improvement.
         If the sentence is acceptable, please approve it.
         
         Format your response as:
         APPROVED: Yes/No
         FEEDBACK: [Your feedback here]
+
+        Sentence:
+        "{sentence}"
         """
         
         system_message = "You are a professional editor who reviews resume content. Be concise in your feedback."
