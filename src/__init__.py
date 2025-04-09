@@ -1,7 +1,7 @@
 """
 Resume Customizer Package
 
-This package contains the resume customization workflow implementation.
+This package contains the components needed for customizing resumes based on job descriptions.
 """
 
 # Import and configure logging

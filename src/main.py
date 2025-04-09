@@ -29,6 +29,7 @@ try:
         SummaryGenerator,
         TitleSelector
     )
+    from .resume_parser import parse_resume_file
 except ImportError:
     # Fall back to absolute import (when run as a script)
     from config import load_dotenv
@@ -44,6 +45,7 @@ except ImportError:
         SummaryGenerator,
         TitleSelector
     )
+    from resume_parser import parse_resume_file
 
 # Get logger for this module
 logger = get_logger()
@@ -404,14 +406,42 @@ class ResumeCustomizer:
         # Education
         markdown += "## Education\n\n"
         for education in self.state["resume_data"]["education"]:
-            markdown += f"### {education['institution']} | {education['degree']} | {education['field_of_study']}\n"
-            markdown += f"*{education['year_of_completion']}*\n\n"
+            # Create a list of available education details
+            edu_details = []
+            if "institution" in education:
+                edu_details.append(education["institution"])
+            if "degree" in education:
+                edu_details.append(education["degree"])
+            if "field_of_study" in education:
+                edu_details.append(education["field_of_study"])
+            
+            # Join available details with pipe separator
+            markdown += f"### {' | '.join(edu_details)}\n"
+            
+            # Add year of completion if available
+            if "year_of_completion" in education:
+                markdown += f"*{education['year_of_completion']}*\n\n"
+            else:
+                markdown += "\n"
         
         # Certificates
         markdown += "## Certificates\n\n"
         for certificate in self.state["resume_data"]["certificates"]:
-            markdown += f"### {certificate['name']} | {certificate['organization']}\n"
-            markdown += f"*{certificate['date_of_issue']}*\n\n"
+            # Create a list of available certificate details
+            cert_details = []
+            if "name" in certificate:
+                cert_details.append(certificate["name"])
+            if "organization" in certificate:
+                cert_details.append(certificate["organization"])
+            
+            # Join available details with pipe separator
+            markdown += f"### {' | '.join(cert_details)}\n"
+            
+            # Add date of issue if available
+            if "date_of_issue" in certificate:
+                markdown += f"*{certificate['date_of_issue']}*\n\n"
+            else:
+                markdown += "\n"
         
         return markdown
     
@@ -430,99 +460,187 @@ class ResumeCustomizer:
 
 async def check_and_create_modular_resume():
     """
-    Check if resume.yaml exists, and run the modularizer if needed.
+    Check if a modular resume exists, and if not, ask the user to create one.
     
     Returns:
-        bool: True if resume.yaml exists or was created, False otherwise
+        bool: True if a modular resume exists or was created, False otherwise
     """
-    log_async_start(logger, "check_and_create_modular_resume")
-    
+    # Check if resume.yaml exists
     input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
     resume_path = os.path.join(input_dir, "resume.yaml")
     
     if os.path.isfile(resume_path):
-        log_async_complete(logger, "check_and_create_modular_resume")
         return True
     
-    logger.info("No modular resume file (resume.yaml) found.")
-    logger.info("Running resume modularizer to create one...")
+    logger.warning("No modular resume file found at input/resume.yaml")
+    response = input("Would you like to create a modular resume now? (Y/n): ").lower()
     
-    # Run modularize_resume.py
-    modularizer_path = os.path.join(os.path.dirname(__file__), "modularize_resume.py")
-    
-    try:
-        subprocess.run([sys.executable, modularizer_path], check=True)
+    if response in ["", "y", "yes"]:
+        # First, check if the user has an existing resume in any format
+        response = input("Do you have an existing resume in PDF, Word, Markdown, or other format? (Y/n): ").lower()
         
-        # Check if resume.yaml was created
-        if os.path.isfile(resume_path):
-            log_async_complete(logger, "check_and_create_modular_resume")
+        if response in ["", "y", "yes"]:
+            # Ask for the resume file
+            file_path = input("Please provide the path to your resume file: ").strip()
+            
+            if not os.path.isfile(file_path):
+                logger.error(f"File not found: {file_path}")
+                return False
+            
+            # Parse the resume into simple YAML format
+            logger.info(f"Parsing resume file: {file_path}")
+            input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
+            simple_resume_path = os.path.join(input_dir, "resume_simple.yaml")
+            
+            parsed_data = await parse_resume_file(file_path, simple_resume_path)
+            if not parsed_data:
+                logger.error("Failed to parse the resume file.")
+                return False
+            
+            logger.info(f"Resume parsed and saved to {simple_resume_path}")
+        else:
+            # Check if resume_simple.yaml exists, and if not, tell the user to create one
+            simple_resume_path = os.path.join(input_dir, "resume_simple.yaml")
+            if not os.path.isfile(simple_resume_path):
+                logger.warning("No simple resume file found at input/resume_simple.yaml")
+                
+                # Import the provide_resume_simple_instructions function from modularize_resume
+                try:
+                    from src.modularize_resume import provide_resume_simple_instructions
+                except ImportError:
+                    try:
+                        from .modularize_resume import provide_resume_simple_instructions
+                    except ImportError:
+                        from modularize_resume import provide_resume_simple_instructions
+                
+                provide_resume_simple_instructions()
+                logger.info("Please create a simple resume file and run the program again.")
+                return False
+        
+        # Import the create_modular_resume function from modularize_resume
+        try:
+            from src.modularize_resume import create_modular_resume
+        except ImportError:
+            try:
+                from .modularize_resume import create_modular_resume
+            except ImportError:
+                from modularize_resume import create_modular_resume
+        
+        # Create a modular resume
+        success = await create_modular_resume(simple_resume_path)
+        
+        if success:
+            logger.info("Modular resume created successfully!")
             return True
         else:
-            logger.error("Failed to create modular resume file.")
-            log_async_complete(logger, "check_and_create_modular_resume")
+            logger.error("Failed to create modular resume.")
             return False
-    except subprocess.SubprocessError as e:
-        logger.error(f"Error running resume modularizer: {e}")
-        log_async_complete(logger, "check_and_create_modular_resume")
+    else:
+        logger.info("Skipping modular resume creation.")
         return False
 
 
 async def async_main():
+    """
+    Asynchronous main function to run the resume customization workflow.
+    """
     log_async_start(logger, "async_main")
     
+    # Parse command line arguments
     parser = argparse.ArgumentParser(description="Customize a resume for a specific job")
-    parser.add_argument("--resume", help="Path to the resume YAML file")
-    parser.add_argument("--job-description", required=False, help="Path to the job description file")
-    parser.add_argument("--output", required=False, help="Path to save the customized resume")
-    parser.add_argument("--skip-modularizer", action="store_true", help="Skip resume modularizer check")
-    parser.add_argument("--clear-company-cache", action="store_true", help="Clear the cached company research data")
-    parser.add_argument("--list-cached-companies", action="store_true", help="List all companies in the research cache")
+    parser.add_argument("--resume", help="Path to the resume file", default=None)
+    parser.add_argument("--job-description", help="Path to the job description file", required=True)
+    parser.add_argument("--output", help="Path to save the customized resume", required=True)
+    parser.add_argument("--skip-modularizer", action="store_true", help="Skip the modularizer check")
+    parser.add_argument("--clear-company-cache", action="store_true", help="Clear the company research cache")
+    parser.add_argument("--list-cached-companies", action="store_true", help="List all cached companies")
     args = parser.parse_args()
     
-    # Handle company cache commands
-    if args.clear_company_cache or args.list_cached_companies:
-        from agents import CompanyResearcher
-        researcher = CompanyResearcher()
-        
-        if args.clear_company_cache:
-            researcher.clear_cache()
-            logger.info("Company research cache cleared.")
-            log_async_complete(logger, "async_main")
-            return
-        
-        if args.list_cached_companies:
-            companies = researcher.list_cached_companies()
+    # Check if we're just listing cached companies
+    if args.list_cached_companies:
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache", "company_research")
+        if os.path.exists(cache_dir):
+            companies = [f.split(".")[0] for f in os.listdir(cache_dir) if f.endswith(".json")]
             if companies:
-                logger.info("Cached company research data:")
-                for company in companies:
-                    logger.info(f" - {company}")
+                logger.info("Cached companies:")
+                for company in sorted(companies):
+                    logger.info(f"- {company}")
             else:
-                logger.info("No cached company research data found.")
-            log_async_complete(logger, "async_main")
-            return
-    
-    # Get the resume file
-    if args.resume:
-        resume_path = args.resume
-    else:
-        input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
-        resume_path = os.path.join(input_dir, "resume.yaml")
-        
-        # Check if resume.yaml needs to be created
-        if not args.skip_modularizer and not os.path.isfile(resume_path):
-            success = await check_and_create_modular_resume()
-            if not success:
-                logger.error("Could not find or create a modular resume file.")
-                logger.error("Please provide a valid resume file with --resume or create one manually.")
-                log_async_complete(logger, "async_main")
-                return
-    
-    # Check if the resume file exists
-    if not os.path.isfile(resume_path):
-        logger.error(f"Resume file not found: {resume_path}")
-        logger.error("Please provide a valid resume file with --resume.")
+                logger.info("No cached companies found.")
+        else:
+            logger.info("No company cache exists yet.")
         log_async_complete(logger, "async_main")
         return
+    
+    # Check if we're clearing the company cache
+    if args.clear_company_cache:
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cache", "company_research")
+        if os.path.exists(cache_dir):
+            for f in os.listdir(cache_dir):
+                if f.endswith(".json"):
+                    os.remove(os.path.join(cache_dir, f))
+            logger.info("Company research cache cleared.")
+        else:
+            logger.info("No company cache exists to clear.")
+        log_async_complete(logger, "async_main")
+        return
+    
+    # Set up paths
+    resume_path = args.resume
+    job_description_path = args.job_description
+    output_path = args.output
+    
+    # If resume path is not provided, use the default path
+    if not resume_path:
+        input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
+        resume_path = os.path.join(input_dir, "resume.yaml")
+    
+    # Check if the provided resume is not in YAML format and needs parsing
+    if resume_path and not resume_path.lower().endswith(('.yaml', '.yml')):
+        logger.info(f"Detected non-YAML resume format: {resume_path}")
+        logger.info("Parsing resume file...")
+        
+        # Parse the resume into YAML format
+        input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
+        yaml_resume_path = os.path.join(input_dir, "resume.yaml")
+        
+        # First convert to simple format
+        simple_resume_path = os.path.join(input_dir, "resume_simple.yaml")
+        parsed_data = await parse_resume_file(resume_path, simple_resume_path)
+        
+        if not parsed_data:
+            logger.error("Failed to parse the resume file. Please provide a YAML resume file or create one first.")
+            log_async_complete(logger, "async_main")
+            return
+        
+        logger.info(f"Resume parsed and saved to {simple_resume_path}")
+        
+        # Now convert to modular format
+        try:
+            from src.modularize_resume import create_modular_resume
+        except ImportError:
+            try:
+                from .modularize_resume import create_modular_resume
+            except ImportError:
+                from modularize_resume import create_modular_resume
+        
+        success = await create_modular_resume(simple_resume_path)
+        
+        if not success:
+            logger.error("Failed to create modular resume from parsed file.")
+            log_async_complete(logger, "async_main")
+            return
+        
+        # Update resume path to the created YAML file
+        resume_path = yaml_resume_path
+    
+    # Check for the modular resume if using the default path and not skipping the modularizer
+    if not args.skip_modularizer and (not resume_path or resume_path == os.path.join(os.path.dirname(os.path.dirname(__file__)), "input", "resume.yaml")):
+        logger.info("Checking for modular resume...")
+        if not await check_and_create_modular_resume():
+            logger.error("Cannot proceed without a modular resume. Please create one and try again.")
+            log_async_complete(logger, "async_main")
+            return
     
     # Get the job description file
     if args.job_description:

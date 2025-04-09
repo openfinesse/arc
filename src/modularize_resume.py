@@ -17,10 +17,12 @@ try:
     # Try relative import
     from .logging_config import get_logger, log_async_start, log_async_complete
     from .agents import ResumeModularizer
+    from .resume_parser import ResumeParser, parse_resume_file
 except ImportError:
     # Try absolute import
     from logging_config import get_logger, log_async_start, log_async_complete
     from agents import ResumeModularizer
+    from resume_parser import ResumeParser, parse_resume_file
 
 # Get logger for this module
 logger = get_logger()
@@ -71,6 +73,31 @@ def check_resume_simple_yaml_exists() -> bool:
     """
     input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
     return os.path.isfile(os.path.join(input_dir, "resume_simple.yaml"))
+
+async def parse_resume(resume_path: str) -> Optional[str]:
+    """
+    Parse a resume file in various formats (PDF, Markdown, DOCX, etc.) into the simple YAML format.
+    
+    Args:
+        resume_path (str): Path to the resume file
+        
+    Returns:
+        Optional[str]: Path to the parsed YAML file or None if parsing failed
+    """
+    log_async_start(logger, "parse_resume")
+    
+    # Get output path for the parsed YAML
+    input_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "input")
+    output_path = os.path.join(input_dir, "resume_simple.yaml")
+    
+    logger.info(f"Parsing resume file: {resume_path}")
+    parsed_data = await parse_resume_file(resume_path, output_path)
+    
+    log_async_complete(logger, "parse_resume")
+    
+    if parsed_data:
+        return output_path
+    return None
 
 async def create_modular_resume(simple_resume_path: str) -> bool:
     """
@@ -156,7 +183,8 @@ async def main_async():
     log_async_start(logger, "main_async")
     
     parser = argparse.ArgumentParser(description="Convert a simple resume to a modular format")
-    parser.add_argument("--simple", help="Path to the simple resume file", default=None)
+    parser.add_argument("--resume", help="Path to any resume file (PDF, DOCX, Markdown, YAML, etc.)", default=None)
+    parser.add_argument("--simple", help="Path to the simple resume YAML file", default=None)
     parser.add_argument("--force", action="store_true", help="Force processing even if resume.yaml exists")
     args = parser.parse_args()
     
@@ -173,8 +201,16 @@ async def main_async():
     # Display welcome message
     logger.info("===== Resume Modularization Tool =====")
     
+    # Process any resume format if provided
+    if args.resume and os.path.isfile(args.resume):
+        # Parse the resume file into simple YAML format
+        simple_resume_path = await parse_resume(args.resume)
+        if not simple_resume_path:
+            logger.error("Failed to parse the provided resume. Please try again or use a simple YAML file.")
+            log_async_complete(logger, "main_async")
+            return
     # If simple resume path was provided via command line, use it
-    if args.simple and os.path.isfile(args.simple):
+    elif args.simple and os.path.isfile(args.simple):
         simple_resume_path = args.simple
     else:
         # Check if resume_simple.yaml exists
@@ -184,19 +220,30 @@ async def main_async():
         else:
             default_simple_path = None
         
-        # Ask if a modular resume file is available
-        response = input("Do you have a simple resume file available? (Y/n): ").strip().lower()
+        # Ask if any resume file is available
+        response = input("Do you have a resume file available? (Y/n): ").strip().lower()
         
         if response in ("", "y", "yes"):
-            simple_resume_path = get_input_path(
-                "Please provide the path to your simple resume file",
+            resume_path = get_input_path(
+                "Please provide the path to your resume file (PDF, DOCX, Markdown, YAML, etc.)",
                 default_simple_path
             )
             
-            if not simple_resume_path:
-                logger.error("No valid simple resume file provided. Exiting.")
+            if not resume_path:
+                logger.error("No valid resume file provided. Exiting.")
                 log_async_complete(logger, "main_async")
                 return
+            
+            # Check if the file is already in simple YAML format or needs parsing
+            if resume_path.lower().endswith(('.yaml', '.yml')) and os.path.basename(resume_path) == "resume_simple.yaml":
+                simple_resume_path = resume_path
+            else:
+                # Parse the resume file into simple YAML format
+                simple_resume_path = await parse_resume(resume_path)
+                if not simple_resume_path:
+                    logger.error("Failed to parse the provided resume. Please try again or use a simple YAML file.")
+                    log_async_complete(logger, "main_async")
+                    return
         else:
             # Ask if they want to create a modular version
             response = input("Would you like to create a modular version of your resume? (Y/n): ").strip().lower()

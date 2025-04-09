@@ -67,12 +67,21 @@ The cache is stored in the `cache/company_research` directory. By default, cache
 
 ## Preparing Your Resume
 
-ARC uses a modular YAML format for your base resume, which allows the system to mix and match content effectively. You have two options:
+ARC uses a modular YAML format for your base resume, which allows the system to mix and match content effectively. You have three options:
 
 1. **Create a resume.yaml file manually** following the structure in the example files
-2. **Let ARC create one for you** by running the system without specifying a resume file
+2. **Import an existing resume in various formats** including PDF, Word (DOCX), Markdown, or plain text
+3. **Let ARC create one for you** by running the system without specifying a resume file
 
-For the second option, ARC will run a modularization process to create a structured YAML file from your inputs.
+For the second option, ARC will use AI to automatically parse your existing resume and convert it into the required YAML structure. This feature supports:
+
+- PDF files
+- Microsoft Word documents (.docx, .doc)
+- Markdown files (.md)
+- Plain text files (.txt)
+- YAML files (if already in the correct format)
+
+For the third option, ARC will run a modularization process to create a structured YAML file from your inputs.
 
 ## Usage
 
@@ -96,6 +105,18 @@ python -m src.main --resume path/to/your/resume.yaml --job-description path/to/j
 - `--skip-modularizer`: Skip checking for and creating a modular resume (optional)
 - `--clear-company-cache`: Clear all cached company research data (optional)
 - `--list-cached-companies`: List all companies in the research cache (optional)
+
+### Modularization Tool
+
+If you need to prepare your resume before using the main application, you can use the modularization tool directly:
+
+```bash
+# To parse any resume format (PDF, DOCX, Markdown, etc.)
+python -m src.modularize_resume --resume path/to/your/resume.pdf
+
+# To use an existing YAML file in the simple format
+python -m src.modularize_resume --simple path/to/your/resume_simple.yaml
+```
 
 ### Managing Company Research Cache
 
