@@ -1,22 +1,26 @@
 # Automated Resume Customizer (ARC)
 
-An intelligent system that tailors your resume to specific job applications by analyzing the job description and selecting the most relevant content from your base resume.
+The majority of AI resume tools are liars. You feed a job description, your resume, and an LLM will try to shove in as many keywords from the job posting into your resume, with no consideration of whether you actually have those skills. 
+It's dishonest and also puts the applyer into a compromised position come interview time.
 
-## Overview
+ARC was created with the express purpose of mitigating this issue. 
 
-ARC creates customized resumes through a multi-step workflow:
+The system goes through each and every point on your resume—before looking at any job description—in order to create a set of keyword variables it can use. It makes sure that the variables created are synonyms, and are directly exchangable with the current keywords in your resume. Users can add keyword variables manually to ensure their full experience is available.
 
-1. Researches the company to enhance the job description with additional context
-2. Selects relevant responsibility and accomplishment groups for each role in your resume
-3. Constructs polished, targeted sentences that highlight your relevant experience
-4. Reviews sentences for clarity, grammar, and readability
-5. Reviews the overall content for relevance and narrative flow
-6. Creates a tailored resume summary that aligns with the job requirements
+## Features
+
+- Researches the company to enhance the job description with additional context
+- Selects relevant sentences for each role in your resume
+- Constructs polished, targeted sentences that highlight your relevant experience
+- Reviews sentences for clarity, grammar, and readability
+- Adjusts action words to avoid repetition 
+- Reviews the overall content for relevance and narrative flow
+- Creates a tailored resume summary that aligns with the job requirements
 
 ## Requirements
 
 - Python 3.8+
-- An OpenAI API key for core functionality
+- An OpenAI or OpenRouter API key for core functionality
 - A Perplexity API key (default) or Tavily API key for company research
 
 ## Installation
@@ -70,7 +74,7 @@ The cache is stored in the `cache/company_research` directory. By default, cache
 ARC uses a modular YAML format for your base resume, which allows the system to mix and match content effectively. You have two options:
 
 1. **Create a resume.yaml file manually** following the structure in the example files
-2. **Let ARC create one for you** by running the system without specifying a resume file
+2. **Let ARC create one for you** by running the system without specifying a yaml resume file
 
 For the second option, ARC will run a modularization process to create a structured YAML file from your inputs.
 
